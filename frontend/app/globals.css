@@ -1,0 +1,409 @@
+:root {
+  --bg: #f4efe5;
+  --bg-strong: #e5dcc9;
+  --surface: rgba(248, 244, 235, 0.86);
+  --surface-strong: #fff8eb;
+  --line: rgba(24, 41, 34, 0.12);
+  --ink: #13261f;
+  --muted: #56655d;
+  --accent: #fc7d5b;
+  --accent-strong: #eb5b34;
+  --teal: #43b2a7;
+  --gold: #f0b44c;
+  --shadow: 0 24px 70px rgba(16, 35, 28, 0.12);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background:
+    radial-gradient(circle at top left, rgba(252, 125, 91, 0.18), transparent 28%),
+    radial-gradient(circle at top right, rgba(67, 178, 167, 0.16), transparent 32%),
+    linear-gradient(180deg, #f8f2e8, #efe6d4 52%, #e8dcc6);
+  color: var(--ink);
+  font-family: "Avenir Next", "Segoe UI", sans-serif;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+.pageShell {
+  padding: 28px;
+}
+
+.hero {
+  display: grid;
+  grid-template-columns: 1.4fr 0.8fr;
+  gap: 24px;
+  align-items: end;
+  margin-bottom: 24px;
+}
+
+.hero h1 {
+  margin: 8px 0 12px;
+  font-family: "Iowan Old Style", Georgia, serif;
+  font-size: clamp(2.4rem, 4vw, 4.8rem);
+  line-height: 0.95;
+  letter-spacing: -0.04em;
+  max-width: 10ch;
+}
+
+.heroCopy {
+  max-width: 58ch;
+  color: var(--muted);
+  font-size: 1.05rem;
+}
+
+.heroStats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.heroStats div,
+.panelCard,
+.mapPanel,
+.resultsPanel {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  backdrop-filter: blur(18px);
+  border-radius: 26px;
+  box-shadow: var(--shadow);
+}
+
+.heroStats div {
+  padding: 18px 20px;
+}
+
+.heroStats span {
+  display: block;
+  font-size: 2rem;
+  font-weight: 700;
+}
+
+.heroStats p,
+.panelHeading p,
+.eyebrow,
+.metaRow,
+.fieldLabel,
+.detailList dt {
+  color: var(--muted);
+}
+
+.eyebrow {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(290px, 340px) minmax(0, 1.2fr) minmax(340px, 420px);
+  gap: 18px;
+  align-items: start;
+}
+
+.controlPanel,
+.resultsPanel {
+  display: grid;
+  gap: 16px;
+}
+
+.panelCard {
+  padding: 18px;
+}
+
+.panelHeading {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: end;
+  padding: 0 4px;
+}
+
+.panelHeading h2 {
+  margin: 6px 0 0;
+  font-size: 1.35rem;
+}
+
+textarea,
+input,
+select {
+  width: 100%;
+  margin-top: 8px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 12px 14px;
+  background: rgba(255, 250, 242, 0.88);
+  color: var(--ink);
+}
+
+textarea {
+  resize: vertical;
+  min-height: 110px;
+}
+
+.quickQueryList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.chipButton,
+.pill {
+  border-radius: 999px;
+  border: 1px solid rgba(19, 38, 31, 0.08);
+  background: rgba(255, 248, 235, 0.82);
+  padding: 8px 12px;
+}
+
+.fieldGrid {
+  display: grid;
+  gap: 12px;
+}
+
+.timelineBlock {
+  margin-top: 16px;
+}
+
+.toggleRow {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-top: 16px;
+}
+
+.assistantCard {
+  background:
+    linear-gradient(180deg, rgba(255, 248, 235, 0.98), rgba(244, 238, 226, 0.92)),
+    radial-gradient(circle at top right, rgba(67, 178, 167, 0.15), transparent 40%);
+}
+
+.errorText {
+  color: #9b3018;
+}
+
+.mapPanel,
+.resultsPanel {
+  padding: 18px;
+}
+
+.mapCanvas,
+.mapLoading {
+  min-height: 680px;
+  border-radius: 24px;
+  overflow: hidden;
+  margin-top: 14px;
+}
+
+.mapLoading {
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, rgba(67, 178, 167, 0.18), rgba(240, 180, 76, 0.18));
+}
+
+.mapPopup {
+  max-width: 240px;
+}
+
+.mapThumb {
+  width: 100%;
+  height: 120px;
+  object-fit: cover;
+  border-radius: 12px;
+  margin-bottom: 10px;
+}
+
+.resultGrid {
+  display: grid;
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.mediaCard {
+  display: grid;
+  grid-template-columns: 124px minmax(0, 1fr);
+  gap: 14px;
+  width: 100%;
+  padding: 10px;
+  border-radius: 22px;
+  border: 1px solid var(--line);
+  background: rgba(255, 249, 240, 0.82);
+  color: inherit;
+  text-align: left;
+  transition: transform 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.mediaCard:hover,
+.mediaCard.active {
+  transform: translateY(-2px);
+  border-color: rgba(252, 125, 91, 0.45);
+  box-shadow: 0 18px 42px rgba(16, 35, 28, 0.12);
+}
+
+.mediaThumb,
+.viewerMedia {
+  width: 100%;
+  border-radius: 18px;
+  object-fit: cover;
+  background: linear-gradient(135deg, rgba(67, 178, 167, 0.18), rgba(252, 125, 91, 0.2));
+}
+
+.mediaThumb {
+  height: 118px;
+}
+
+.viewerMedia {
+  min-height: 220px;
+  max-height: 320px;
+}
+
+.placeholderThumb {
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+}
+
+.mediaMeta p,
+.inspectorCaption,
+.segmentCard p {
+  color: var(--muted);
+}
+
+.mediaHeadline,
+.metaRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.tagRow {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.badge {
+  align-self: start;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.badge.image {
+  background: rgba(252, 125, 91, 0.18);
+  color: var(--accent-strong);
+}
+
+.badge.video {
+  background: rgba(67, 178, 167, 0.16);
+  color: #0d625b;
+}
+
+.inspectorPanel {
+  margin-top: 16px;
+  padding: 18px;
+  border-radius: 22px;
+  border: 1px solid var(--line);
+  background: rgba(255, 251, 244, 0.92);
+}
+
+.inspectorHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: start;
+}
+
+.inspectorHeader h3,
+.emptyState h3 {
+  margin: 6px 0 0;
+}
+
+.detailList {
+  display: grid;
+  gap: 14px;
+}
+
+.detailList dd {
+  margin: 4px 0 0;
+}
+
+.pathValue {
+  word-break: break-all;
+}
+
+.inspectorBlock {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.segmentList {
+  display: grid;
+  gap: 10px;
+}
+
+.segmentCard {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 12px;
+  background: rgba(247, 241, 231, 0.72);
+}
+
+.emptyState {
+  padding: 24px;
+  border: 1px dashed rgba(19, 38, 31, 0.22);
+  border-radius: 22px;
+}
+
+@media (max-width: 1200px) {
+  .workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .mapCanvas,
+  .mapLoading {
+    min-height: 460px;
+  }
+}
+
+@media (max-width: 760px) {
+  .pageShell {
+    padding: 18px;
+  }
+
+  .hero {
+    grid-template-columns: 1fr;
+  }
+
+  .heroStats {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .mediaCard {
+    grid-template-columns: 1fr;
+  }
+}
