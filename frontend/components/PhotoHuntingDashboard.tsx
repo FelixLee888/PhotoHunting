@@ -15,8 +15,8 @@ const QUICK_QUERIES = [
   "Find pictures of my black cat",
 ];
 
-const START_YEAR = 2024;
-const END_YEAR = 2026;
+const START_YEAR = 2000;
+const END_YEAR = new Date().getFullYear();
 
 export function PhotoHuntingDashboard() {
   const [query, setQuery] = useState("Show hiking photos in Scotland");

@@ -131,8 +131,20 @@ class IngestionService:
         item.caption = caption
         item.tags = tags
         item.objects = objects
-        item.latitude = metadata.get("latitude")
-        item.longitude = metadata.get("longitude")
+        item.latitude = (
+            metadata.get("latitude")
+            if metadata.get("latitude") is not None
+            else location.get("latitude")
+            if location.get("latitude") is not None
+            else item.latitude
+        )
+        item.longitude = (
+            metadata.get("longitude")
+            if metadata.get("longitude") is not None
+            else location.get("longitude")
+            if location.get("longitude") is not None
+            else item.longitude
+        )
         item.country = location.get("country") or item.country
         item.region = location.get("region") or item.region
         item.city = location.get("city") or item.city
@@ -168,4 +180,3 @@ class IngestionService:
                     embedding=self.embedder.embed_text(" ".join([caption, item.caption, item.place or ""])),
                 )
             )
-

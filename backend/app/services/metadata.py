@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import subprocess
 from datetime import datetime
 from pathlib import Path
@@ -17,12 +18,131 @@ GPS_TAGS = {value: key for key, value in ExifTags.GPSTAGS.items()}
 
 
 KNOWN_LOCATIONS = {
-    "skye": {"country": "Scotland", "region": "Highlands", "city": "Isle of Skye", "place": "Skye"},
-    "glencoe": {"country": "Scotland", "region": "Highlands", "city": "Glencoe", "place": "Glencoe"},
-    "ben nevis": {"country": "Scotland", "region": "Highlands", "city": "Fort William", "place": "Ben Nevis"},
-    "kamikochi": {"country": "Japan", "region": "Nagano", "city": "Matsumoto", "place": "Kamikochi"},
-    "tokyo": {"country": "Japan", "region": "Tokyo", "city": "Tokyo", "place": "Tokyo"},
+    "isle of skye": {
+        "country": "United Kingdom",
+        "region": "Scotland",
+        "city": "Isle of Skye",
+        "place": "Isle of Skye",
+        "latitude": 57.5357,
+        "longitude": -6.2263,
+    },
+    "skye": {
+        "country": "United Kingdom",
+        "region": "Scotland",
+        "city": "Isle of Skye",
+        "place": "Isle of Skye",
+        "latitude": 57.5357,
+        "longitude": -6.2263,
+    },
+    "glencoe": {
+        "country": "United Kingdom",
+        "region": "Scotland",
+        "city": "Glencoe",
+        "place": "Glencoe",
+        "latitude": 56.6825,
+        "longitude": -5.1027,
+    },
+    "ben nevis": {
+        "country": "United Kingdom",
+        "region": "Scotland",
+        "city": "Fort William",
+        "place": "Ben Nevis",
+        "latitude": 56.7969,
+        "longitude": -5.0036,
+    },
+    "fort william": {
+        "country": "United Kingdom",
+        "region": "Scotland",
+        "city": "Fort William",
+        "place": "Fort William",
+        "latitude": 56.8198,
+        "longitude": -5.1052,
+    },
+    "ben cleuch": {
+        "country": "United Kingdom",
+        "region": "Scotland",
+        "city": "Clackmannanshire",
+        "place": "Ben Cleuch",
+        "latitude": 56.1636,
+        "longitude": -3.7344,
+    },
+    "ben ledi": {
+        "country": "United Kingdom",
+        "region": "Scotland",
+        "city": "Callander",
+        "place": "Ben Ledi",
+        "latitude": 56.2516,
+        "longitude": -4.2432,
+    },
+    "scotland": {
+        "country": "United Kingdom",
+        "region": "Scotland",
+        "place": "Scotland",
+        "latitude": 56.4907,
+        "longitude": -4.2026,
+    },
+    "uk": {
+        "country": "United Kingdom",
+        "place": "United Kingdom",
+        "latitude": 55.3781,
+        "longitude": -3.4360,
+    },
+    "hungary": {
+        "country": "Hungary",
+        "place": "Hungary",
+        "latitude": 47.1625,
+        "longitude": 19.5033,
+    },
+    "sweden": {
+        "country": "Sweden",
+        "place": "Sweden",
+        "latitude": 60.1282,
+        "longitude": 18.6435,
+    },
+    "japan": {
+        "country": "Japan",
+        "place": "Japan",
+        "latitude": 36.2048,
+        "longitude": 138.2529,
+    },
+    "kamikochi": {
+        "country": "Japan",
+        "region": "Nagano",
+        "city": "Matsumoto",
+        "place": "Kamikochi",
+        "latitude": 36.2453,
+        "longitude": 137.6360,
+    },
+    "tokyo": {
+        "country": "Japan",
+        "region": "Tokyo",
+        "city": "Tokyo",
+        "place": "Tokyo",
+        "latitude": 35.6764,
+        "longitude": 139.6500,
+    },
 }
+
+GENERIC_PATH_TOKENS = {
+    "photo",
+    "photos",
+    "img",
+    "image",
+    "images",
+    "trip",
+    "trips",
+    "video",
+    "videos",
+    "dji",
+    "public",
+    "volumes",
+    "gptempdownload",
+}
+
+DATE_PREFIX_PATTERN = re.compile(r"^\d{4}(?:[-_ ]\d{2}){0,2}\s*")
+WHITESPACE_PATTERN = re.compile(r"\s+")
+NON_ALNUM_PATTERN = re.compile(r"[^a-z0-9]+")
+LOCATION_ALIASES = tuple(sorted(KNOWN_LOCATIONS, key=len, reverse=True))
 
 
 def compute_checksum(path: Path) -> str:
@@ -63,6 +183,47 @@ def _json_safe(value):
         return float(value)
     except (TypeError, ValueError):
         return str(value)
+
+
+def _normalize_text(value: str) -> str:
+    lowered = value.lower().replace("_", " ").replace("-", " ")
+    collapsed = NON_ALNUM_PATTERN.sub(" ", lowered)
+    return WHITESPACE_PATTERN.sub(" ", collapsed).strip()
+
+
+def _clean_location_part(part: str) -> str:
+    text = part.strip()
+    if not text:
+        return ""
+    text = Path(text).stem
+    text = text.replace("_", " ").replace("-", " ")
+    text = DATE_PREFIX_PATTERN.sub("", text).strip()
+    return WHITESPACE_PATTERN.sub(" ", text)
+
+
+def _lookup_known_location(path: Path) -> dict:
+    normalized_parts = [_normalize_text(_clean_location_part(part)) for part in path.parts[:-1]]
+    normalized_path = f" {' '.join(part for part in normalized_parts if part)} "
+    for alias in LOCATION_ALIASES:
+        if f" {alias} " in normalized_path:
+            return KNOWN_LOCATIONS[alias].copy()
+    return {}
+
+
+def _fallback_place_from_path(path: Path) -> dict:
+    for part in path.parts[:-1]:
+        cleaned = _clean_location_part(part)
+        if not cleaned:
+            continue
+        words = []
+        for raw_word in cleaned.split():
+            normalized = _normalize_text(raw_word)
+            if not normalized or normalized in GENERIC_PATH_TOKENS or normalized.isdigit():
+                continue
+            words.append(raw_word)
+        if words:
+            return {"place": " ".join(words[:4])}
+    return {}
 
 
 def _to_decimal(value, reference) -> float | None:
@@ -147,19 +308,10 @@ def _parse_frame_rate(value: str | None) -> float | None:
 
 
 def infer_location_from_path(path: Path) -> dict:
-    normalized = " ".join(part.lower().replace("_", " ") for part in path.parts)
-    for name, location in KNOWN_LOCATIONS.items():
-        if name in normalized:
-            return location.copy()
-
-    tokens = [token for token in normalized.split() if token.isalpha()]
-    if len(tokens) >= 2:
-        guess = " ".join(token.capitalize() for token in tokens[-2:])
-    elif tokens:
-        guess = tokens[-1].capitalize()
-    else:
-        guess = None
-    return {"place": guess} if guess else {}
+    known_location = _lookup_known_location(path)
+    if known_location:
+        return known_location
+    return _fallback_place_from_path(path)
 
 
 def caption_and_tags_from_path(path: Path, media_type: str) -> tuple[str, list[str], list[str]]:
