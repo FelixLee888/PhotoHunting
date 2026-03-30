@@ -26,7 +26,7 @@ class DeterministicEmbeddingProvider:
     def __init__(self, dimensions: int = 256) -> None:
         self.dimensions = dimensions
 
-    def embed_text(self, text: str) -> list[float]:
+    def _embed(self, text: str) -> list[float]:
         tokens = [token.strip().lower() for token in text.split() if token.strip()]
         if not tokens:
             tokens = ["empty"]
@@ -38,6 +38,15 @@ class DeterministicEmbeddingProvider:
         magnitude = math.sqrt(sum(value * value for value in vector)) or 1.0
         return [value / magnitude for value in vector]
 
+    def embed_text(self, text: str) -> list[float]:
+        return self._embed(text)
+
+    def embed_document(self, text: str) -> list[float]:
+        return self._embed(text)
+
+    def embed_query(self, text: str) -> list[float]:
+        return self._embed(text)
+
 
 class GeminiEmbeddingProvider:
     def __init__(self, settings: Settings) -> None:
@@ -45,33 +54,43 @@ class GeminiEmbeddingProvider:
         self.fallback = DeterministicEmbeddingProvider(settings.embedding_dimensions)
 
     def embed_text(self, text: str) -> list[float]:
+        return self.embed_document(text)
+
+    def embed_document(self, text: str) -> list[float]:
+        return self._embed(text, task_type="RETRIEVAL_DOCUMENT")
+
+    def embed_query(self, text: str) -> list[float]:
+        return self._embed(text, task_type="RETRIEVAL_QUERY")
+
+    def _embed(self, text: str, *, task_type: str) -> list[float]:
         if not self.settings.gemini_api_key:
-            return self.fallback.embed_text(text)
+            return self.fallback.embed_document(text)
 
-        endpoint = self.settings.gemini_embedding_endpoint_template.format(
-            model=self.settings.gemini_embedding_model
-        )
-        payload = {
-            "content": {"parts": [{"text": text}]},
-            "taskType": "RETRIEVAL_DOCUMENT",
-            "outputDimensionality": self.settings.embedding_dimensions,
-        }
         headers = {"x-goog-api-key": self.settings.gemini_api_key}
+        candidate_models = [self.settings.gemini_embedding_model]
+        if self.settings.gemini_embedding_model != "gemini-embedding-001":
+            candidate_models.append("gemini-embedding-001")
 
-        try:
-            response = httpx.post(endpoint, json=payload, headers=headers, timeout=20.0)
-            response.raise_for_status()
-            data = response.json()
-            values = data.get("embedding", {}).get("values") or data.get("embeddings", [{}])[0].get("values")
-            if isinstance(values, list) and values:
-                return [float(value) for value in values]
-        except Exception:
-            pass
-        return self.fallback.embed_text(text)
+        for model_name in candidate_models:
+            endpoint = self.settings.gemini_embedding_endpoint_template.format(model=model_name)
+            payload = {
+                "content": {"parts": [{"text": text}]},
+                "taskType": task_type,
+                "outputDimensionality": self.settings.embedding_dimensions,
+            }
+            try:
+                response = httpx.post(endpoint, json=payload, headers=headers, timeout=20.0)
+                response.raise_for_status()
+                data = response.json()
+                values = data.get("embedding", {}).get("values") or data.get("embeddings", [{}])[0].get("values")
+                if isinstance(values, list) and values:
+                    return [float(value) for value in values]
+            except Exception:
+                continue
+        return self.fallback.embed_document(text)
 
 
 def build_embedding_provider(settings: Settings) -> DeterministicEmbeddingProvider | GeminiEmbeddingProvider:
     if settings.embedding_provider.lower() == "gemini":
         return GeminiEmbeddingProvider(settings)
     return DeterministicEmbeddingProvider(settings.embedding_dimensions)
-

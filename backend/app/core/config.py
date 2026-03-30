@@ -18,12 +18,25 @@ class Settings(BaseSettings):
     qdrant_url: str = "http://localhost:6333"
     qdrant_collection_prefix: str = "photohunting"
     embedding_provider: str = "deterministic"
+    static_frontend_dir: str | None = None
     gemini_api_key: str | None = None
     gemini_embedding_model: str = "gemini-embedding-2"
     gemini_embedding_endpoint_template: str = (
         "https://generativelanguage.googleapis.com/v1beta/models/{model}:embedContent"
     )
+    gemini_analysis_enabled: bool = False
+    gemini_analysis_model: str = "gemini-2.5-flash"
+    gemini_analysis_endpoint_template: str = (
+        "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+    )
+    gemini_analysis_max_dimension: int = 1600
+    gemini_analysis_max_inline_bytes: int = 4_000_000
+    gemini_analysis_timeout_seconds: float = 45.0
     embedding_dimensions: int = 256
+    analysis_claim_stale_minutes: int = 20
+    preview_cache_dir: str = "./data/previews"
+    preview_max_dimension: int = 480
+    preview_jpeg_quality: int = 72
     seed_demo_data: bool = True
 
     @field_validator("backend_cors_origins", "media_roots", mode="before")

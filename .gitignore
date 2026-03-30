@@ -1,6 +1,8 @@
 .DS_Store
 .env
 .venv/
+.venv-florence/
+.vscode/
 __pycache__/
 *.pyc
 *.egg-info/

@@ -7,8 +7,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
-from app.models import MediaItem, MediaSegment
+from app.models import AnalysisStatus, MediaItem, MediaSegment
 from app.schemas.ingest import ScanResponse
+from app.services.analysis_queue import build_embedding_source, merge_unique
 from app.services.embeddings import build_embedding_provider
 from app.services.metadata import (
     IMAGE_EXTENSIONS,
@@ -18,6 +19,7 @@ from app.services.metadata import (
     extract_image_metadata,
     extract_video_metadata,
     infer_location_from_path,
+    infer_trip_from_path,
 )
 from app.services.vector_store import VectorStore
 
@@ -39,7 +41,14 @@ class IngestionService:
 
         roots = [Path(path).expanduser() for path in (paths or self.settings.media_roots)]
         if not roots:
-            return ScanResponse(scanned=0, created=0, updated=0, deleted=0, skipped=0, warnings=["No media roots configured."])
+            return ScanResponse(
+                scanned=0,
+                created=0,
+                updated=0,
+                deleted=0,
+                skipped=0,
+                warnings=["No media roots configured."],
+            )
 
         for root in roots:
             if not root.exists():
@@ -89,27 +98,36 @@ class IngestionService:
             else extract_video_metadata(file_path)
         )
         media_type = metadata.get("media_type", "image")
-        caption, tags, objects = caption_and_tags_from_path(file_path, media_type)
+        base_caption, base_tags, base_objects = caption_and_tags_from_path(file_path, media_type)
         location = infer_location_from_path(file_path)
+        trip_info = infer_trip_from_path(file_path)
         stat = file_path.stat()
-        embedding_source = " ".join(
-            filter(
-                None,
-                [
-                    caption,
-                    " ".join(tags),
-                    location.get("place"),
-                    location.get("country"),
-                ],
-            )
-        )
-        embedding = self.embedder.embed_text(embedding_source)
 
         item = existing_by_path or moved_item
         created = item is None
+        previous_checksum = item.checksum if item else None
+        previous_status = item.analysis_status if item else None
+        checksum_changed = created or previous_checksum != checksum
+
         if item is None:
-            item = MediaItem(checksum=checksum, source_path=str(file_path), filename=file_path.name, media_type=media_type)
+            item = MediaItem(
+                checksum=checksum,
+                source_path=str(file_path),
+                filename=file_path.name,
+                media_type=media_type,
+            )
             db.add(item)
+
+        existing_metadata_json = dict(item.metadata_json or {})
+        has_existing_ai_payload = bool(
+            item.caption_ai
+            or item.caption_dense
+            or item.tags_json
+            or item.objects_json
+            or item.landmarks_json
+            or item.scene_json
+        )
+        preserve_ai_content = bool(item.id and not checksum_changed and has_existing_ai_payload)
 
         item.checksum = checksum
         item.source_path = str(file_path)
@@ -128,9 +146,6 @@ class IngestionService:
         item.lens = metadata.get("lens")
         item.focal_length = metadata.get("focal_length")
         item.orientation = metadata.get("orientation")
-        item.caption = caption
-        item.tags = tags
-        item.objects = objects
         item.latitude = (
             metadata.get("latitude")
             if metadata.get("latitude") is not None
@@ -150,8 +165,71 @@ class IngestionService:
         item.city = location.get("city") or item.city
         item.place = location.get("place") or item.place
         item.landmark = location.get("landmark") or item.landmark
-        item.embedding = embedding
-        item.metadata_json = metadata
+        item.trip_name = trip_info.get("trip_name")
+
+        metadata_json = dict(existing_metadata_json)
+        metadata_json.update(metadata)
+        if trip_info:
+            metadata_json["trip_folder"] = trip_info
+        else:
+            metadata_json.pop("trip_folder", None)
+
+        if media_type == "image":
+            if preserve_ai_content:
+                item.caption = item.caption_ai or item.caption or base_caption
+                item.tags = merge_unique(item.tags or [], item.tags_json or [], base_tags)
+                item.objects = merge_unique(item.objects or [], item.objects_json or [], base_objects)
+                item.people = list(item.people or [])
+                item.ocr_text = item.ocr_text or ""
+            else:
+                item.caption = base_caption
+                item.tags = merge_unique(base_tags)
+                item.objects = merge_unique(base_objects)
+                item.people = []
+                item.ocr_text = ""
+
+            if created or checksum_changed:
+                item.analysis_status = AnalysisStatus.PENDING.value
+                item.analysis_worker_id = None
+                item.analysis_claimed_at = None
+                item.analysis_heartbeat_at = None
+                item.analysis_model = None
+                item.analysis_version = None
+                item.analysis_error = None
+                item.analysis_completed_at = None
+                item.caption_ai = None
+                item.caption_dense = None
+                item.tags_json = []
+                item.objects_json = []
+                item.landmarks_json = []
+                item.scene_json = {}
+                metadata_json.pop("analysis_pipeline", None)
+                metadata_json.pop("ai_analysis", None)
+            elif previous_status in {None, AnalysisStatus.SKIPPED.value}:
+                item.analysis_status = AnalysisStatus.PENDING.value
+                item.analysis_worker_id = None
+                item.analysis_claimed_at = None
+                item.analysis_heartbeat_at = None
+                item.analysis_error = None
+            elif previous_status == AnalysisStatus.FAILED.value and not preserve_ai_content:
+                item.analysis_status = AnalysisStatus.PENDING.value
+                item.analysis_worker_id = None
+                item.analysis_claimed_at = None
+                item.analysis_heartbeat_at = None
+                item.analysis_error = None
+        else:
+            item.caption = base_caption
+            item.tags = merge_unique(base_tags)
+            item.objects = merge_unique(base_objects)
+            item.people = []
+            item.analysis_status = AnalysisStatus.SKIPPED.value
+            item.analysis_worker_id = None
+            item.analysis_claimed_at = None
+            item.analysis_heartbeat_at = None
+            item.analysis_error = None
+
+        item.metadata_json = metadata_json
+        item.embedding = self.embedder.embed_document(build_embedding_source(item))
         item.last_seen_at = datetime.utcnow()
         item.deleted_at = None
 
@@ -177,6 +255,6 @@ class IngestionService:
                     timestamp_end=checkpoint,
                     caption=caption,
                     content_text=" ".join(item.tags),
-                    embedding=self.embedder.embed_text(" ".join([caption, item.caption, item.place or ""])),
+                    embedding=self.embedder.embed_document(" ".join([caption, item.caption, item.place or ""])),
                 )
             )

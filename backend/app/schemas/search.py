@@ -10,6 +10,8 @@ from app.schemas.common import MediaCard
 class SearchRequest(BaseModel):
     query: str = ""
     media_type: str | None = None
+    analysis_status: str | None = None
+    trip_name: str | None = None
     tags: list[str] = Field(default_factory=list)
     country: str | None = None
     region: str | None = None
@@ -21,6 +23,7 @@ class SearchRequest(BaseModel):
     near_longitude: float | None = None
     near_radius_km: float | None = None
     similar_to_id: str | None = None
+    offset: int = 0
     limit: int = 24
 
 
@@ -28,5 +31,5 @@ class SearchResponse(BaseModel):
     query: str
     interpreted_filters: dict
     explanation: str
+    total_count: int
     results: list[MediaCard]
-

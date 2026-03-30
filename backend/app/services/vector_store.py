@@ -13,6 +13,8 @@ class VectorStore:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.client: QdrantClient | None = None
+        if not settings.qdrant_url or settings.qdrant_url.lower() in {"none", "disabled", "local"}:
+            return
         try:
             self.client = QdrantClient(url=settings.qdrant_url, timeout=3.0)
         except Exception:

@@ -16,7 +16,10 @@ router = APIRouter(prefix="/map", tags=["map"])
 @router.get("/points", response_model=MapResponse)
 def get_map_points(
     bbox: str | None = Query(default=None, description="min_lat,min_lng,max_lat,max_lng"),
+    zoom: int | None = Query(default=None, ge=1, le=18),
     media_type: str | None = None,
+    analysis_status: str | None = None,
+    trip_name: str | None = None,
     country: str | None = None,
     region: str | None = None,
     city: str | None = None,
@@ -29,7 +32,10 @@ def get_map_points(
     return map_service.get_points(
         db,
         bbox=bbox,
+        zoom=zoom,
         media_type=media_type,
+        analysis_status=analysis_status,
+        trip_name=trip_name,
         country=country,
         region=region,
         city=city,
@@ -37,4 +43,3 @@ def get_map_points(
         date_from=date_from,
         date_to=date_to,
     )
-

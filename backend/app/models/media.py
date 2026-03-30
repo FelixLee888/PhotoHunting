@@ -21,6 +21,14 @@ class SegmentType(StrEnum):
     OCR = "ocr"
 
 
+class AnalysisStatus(StrEnum):
+    PENDING = "pending"
+    CLAIMED = "claimed"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+
+
 class MediaItem(Base):
     __tablename__ = "media_items"
 
@@ -59,6 +67,21 @@ class MediaItem(Base):
     landmark: Mapped[str | None] = mapped_column(String(120), nullable=True)
     trip_name: Mapped[str | None] = mapped_column(String(160), nullable=True, index=True)
     thumbnail_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    analysis_status: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
+    analysis_attempts: Mapped[int] = mapped_column(Integer, default=0)
+    analysis_worker_id: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    analysis_claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False), nullable=True)
+    analysis_heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False), nullable=True)
+    analysis_model: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    analysis_version: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    analysis_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    analysis_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False), nullable=True)
+    caption_ai: Mapped[str | None] = mapped_column(Text, nullable=True)
+    caption_dense: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tags_json: Mapped[list[str]] = mapped_column(JSON, default=list)
+    objects_json: Mapped[list[str]] = mapped_column(JSON, default=list)
+    landmarks_json: Mapped[list[str]] = mapped_column(JSON, default=list)
+    scene_json: Mapped[dict] = mapped_column(JSON, default=dict)
     indexed_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), default=datetime.utcnow)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), default=datetime.utcnow)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False), nullable=True, index=True)
@@ -84,4 +107,3 @@ class MediaSegment(Base):
     thumbnail_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
 
     media_item: Mapped["MediaItem"] = relationship(back_populates="segments")
-

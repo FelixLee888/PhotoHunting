@@ -9,6 +9,7 @@ class MapPoint(BaseModel):
     media_id: str
     latitude: float
     longitude: float
+    cluster_size: int = 1
     thumbnail: str | None = None
     caption: str | None = None
     date: datetime | None = None
@@ -27,4 +28,3 @@ class MapRoute(BaseModel):
 class MapResponse(BaseModel):
     points: list[MapPoint]
     routes: list[MapRoute] = Field(default_factory=list)
-

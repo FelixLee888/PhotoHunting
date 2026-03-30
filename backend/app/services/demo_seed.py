@@ -40,7 +40,7 @@ def seed_demo_data(db: Session, settings) -> None:
             duration=item_data.get("duration"),
             transcript=item_data.get("transcript", ""),
             ocr_text=item_data.get("ocr_text", ""),
-            embedding=embedder.embed_text(
+            embedding=embedder.embed_document(
                 " ".join(
                     filter(
                         None,
@@ -71,9 +71,8 @@ def seed_demo_data(db: Session, settings) -> None:
                     timestamp_end=segment_data.get("timestamp_end"),
                     caption=segment_data.get("caption", ""),
                     content_text=segment_data.get("content_text", ""),
-                    embedding=embedder.embed_text(segment_text),
+                    embedding=embedder.embed_document(segment_text),
                     thumbnail_url=media.thumbnail_url,
                 )
             )
     db.commit()
-
