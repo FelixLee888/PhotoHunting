@@ -39,17 +39,26 @@ class AnalysisQueueService:
         analysis_model: str | None = None,
         analysis_version: str | None = None,
     ) -> AnalysisJobListResponse:
+        normalized_status = status.strip().lower() if status else AnalysisStatus.PENDING.value
         lookahead_limit = min(max(limit * 8, 24), 80)
-        jobs = self._select_jobs(
-            db,
-            request,
-            clause=MediaItem.analysis_status.in_([AnalysisStatus.PENDING.value, AnalysisStatus.FAILED.value]),
-            lookahead_limit=lookahead_limit,
-            requested_limit=limit,
-            ordering=(MediaItem.indexed_at.asc(), MediaItem.id.asc()),
-        )
+        if normalized_status == AnalysisStatus.PENDING.value:
+            jobs = self._select_pending_and_failed_jobs(
+                db,
+                request,
+                lookahead_limit=lookahead_limit,
+                requested_limit=limit,
+            )
+        else:
+            jobs = self._select_jobs(
+                db,
+                request,
+                clause=MediaItem.analysis_status == normalized_status,
+                lookahead_limit=lookahead_limit,
+                requested_limit=limit,
+                ordering=(MediaItem.indexed_at.asc(), MediaItem.id.asc()),
+            )
 
-        if len(jobs) < limit and status.strip().lower() == AnalysisStatus.PENDING.value and (analysis_model or analysis_version):
+        if len(jobs) < limit and normalized_status == AnalysisStatus.PENDING.value and (analysis_model or analysis_version):
             jobs.extend(
                 self._select_jobs(
                     db,
@@ -68,6 +77,63 @@ class AnalysisQueueService:
             )
 
         return AnalysisJobListResponse(jobs=jobs[:limit])
+
+    def _select_pending_and_failed_jobs(
+        self,
+        db: Session,
+        request: Request,
+        *,
+        lookahead_limit: int,
+        requested_limit: int,
+    ) -> list[AnalysisJob]:
+        rows = []
+        for status in (AnalysisStatus.PENDING.value, AnalysisStatus.FAILED.value):
+            statement = (
+                select(
+                    MediaItem.id,
+                    MediaItem.filename,
+                    MediaItem.source_path,
+                    MediaItem.checksum,
+                    MediaItem.thumbnail_url,
+                    MediaItem.date_taken,
+                    MediaItem.width,
+                    MediaItem.height,
+                    MediaItem.camera_model,
+                    MediaItem.country,
+                    MediaItem.region,
+                    MediaItem.city,
+                    MediaItem.place,
+                    MediaItem.latitude,
+                    MediaItem.longitude,
+                    MediaItem.analysis_status,
+                    MediaItem.analysis_attempts,
+                    MediaItem.analysis_model,
+                    MediaItem.analysis_version,
+                    MediaItem.indexed_at.label("queue_indexed_at"),
+                )
+                .where(
+                    and_(
+                        MediaItem.deleted_at.is_(None),
+                        MediaItem.media_type == "image",
+                        MediaItem.analysis_status == status,
+                    )
+                )
+                .order_by(MediaItem.indexed_at.asc(), MediaItem.id.asc())
+                .limit(lookahead_limit)
+            )
+            rows.extend(db.execute(statement).all())
+
+        rows.sort(
+            key=lambda row: (
+                getattr(row, "queue_indexed_at", None) or datetime.min,
+                row.id,
+            )
+        )
+
+        jobs: list[AnalysisJob] = []
+        for row in rows[:requested_limit]:
+            jobs.append(self._job_from_row(row, request))
+        return jobs
 
     def _select_jobs(
         self,
@@ -100,6 +166,7 @@ class AnalysisQueueService:
                 MediaItem.analysis_attempts,
                 MediaItem.analysis_model,
                 MediaItem.analysis_version,
+                MediaItem.indexed_at.label("queue_indexed_at"),
             )
             .where(
                 and_(
@@ -114,34 +181,36 @@ class AnalysisQueueService:
         rows = db.execute(statement).all()
         jobs: list[AnalysisJob] = []
         for row in rows:
-            jobs.append(
-                AnalysisJob(
-                    id=row.id,
-                    filename=row.filename,
-                    source_path=row.source_path,
-                    checksum=row.checksum,
-                    stream_url=str(request.url_for("stream_media", media_id=row.id)),
-                    thumbnail_url=row.thumbnail_url,
-                    date_taken=row.date_taken,
-                    width=row.width,
-                    height=row.height,
-                    camera_model=row.camera_model,
-                    country=row.country,
-                    region=row.region,
-                    city=row.city,
-                    place=row.place,
-                    latitude=row.latitude,
-                    longitude=row.longitude,
-                    metadata_json={},
-                    analysis_status=row.analysis_status,
-                    analysis_attempts=row.analysis_attempts or 0,
-                    analysis_model=row.analysis_model,
-                    analysis_version=row.analysis_version,
-                )
-            )
+            jobs.append(self._job_from_row(row, request))
             if len(jobs) >= requested_limit:
                 break
         return jobs
+
+    @staticmethod
+    def _job_from_row(row, request: Request) -> AnalysisJob:
+        return AnalysisJob(
+            id=row.id,
+            filename=row.filename,
+            source_path=row.source_path,
+            checksum=row.checksum,
+            stream_url=str(request.url_for("stream_media", media_id=row.id)),
+            thumbnail_url=row.thumbnail_url,
+            date_taken=row.date_taken,
+            width=row.width,
+            height=row.height,
+            camera_model=row.camera_model,
+            country=row.country,
+            region=row.region,
+            city=row.city,
+            place=row.place,
+            latitude=row.latitude,
+            longitude=row.longitude,
+            metadata_json={},
+            analysis_status=row.analysis_status,
+            analysis_attempts=row.analysis_attempts or 0,
+            analysis_model=row.analysis_model,
+            analysis_version=row.analysis_version,
+        )
 
     def claim_job(
         self,

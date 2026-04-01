@@ -256,6 +256,15 @@ function buildSemanticTiles(items: MediaCard[]): SemanticTile[] {
   return tiles;
 }
 
+function buildFlatTiles(items: MediaCard[]): SemanticTile[] {
+  return items.map((item) => ({
+    kind: "media" as const,
+    key: item.id,
+    item,
+    hero: false,
+  }));
+}
+
 export const ResultGrid = memo(function ResultGrid({
   emptyDescription = "Try a broader search, a different tag, or clear the current map bounds.",
   emptyTitle = "No results",
@@ -337,6 +346,7 @@ export const ResultGrid = memo(function ResultGrid({
     () => (tripStories.length ? [] : results.slice(0, Math.min(3, results.length))),
     [results, tripStories.length],
   );
+  const useSemanticLayout = density === "comfortable" && results.length <= 240;
   const groupedCards = useMemo<RenderMonthGroup[]>(() => {
     const streamCards = highlightCards.length ? results.slice(highlightCards.length) : results;
     const defaultCards = streamCards.length ? streamCards : results;
@@ -350,10 +360,10 @@ export const ResultGrid = memo(function ResultGrid({
       ...group,
       items: group.items.map((dayGroup) => ({
         ...dayGroup,
-        tiles: buildSemanticTiles(dayGroup.items),
+        tiles: useSemanticLayout ? buildSemanticTiles(dayGroup.items) : buildFlatTiles(dayGroup.items),
       })),
     }));
-  }, [groupByDay, highlightCards.length, results]);
+  }, [groupByDay, highlightCards.length, results, useSemanticLayout]);
 
   return (
     <div className="googlePhotosFeed">

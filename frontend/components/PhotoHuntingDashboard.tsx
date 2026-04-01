@@ -13,7 +13,8 @@ const END_YEAR = new Date().getFullYear();
 const COUNT_FORMATTER = new Intl.NumberFormat();
 const SCAN_POLL_MS = 5000;
 const BROWSE_LIMIT = 180;
-const BROWSE_OVERVIEW_LIMIT = 72;
+const BROWSE_OVERVIEW_LIMIT = 50;
+const MONTH_INITIAL_LIMIT = 30;
 const TRIP_INITIAL_LIMIT = 50;
 type ScrubberItem = {
   key: string;
@@ -21,6 +22,9 @@ type ScrubberItem = {
   shortLabel: string;
   progress: number;
   anchorId: string;
+  kind: "year" | "month";
+  year: number;
+  monthKey: string;
 };
 
 type IdleSchedulerWindow = Window & {
@@ -52,6 +56,13 @@ function formatSearchProgressSummary(visibleCount: number, totalCount: number): 
     return formatSearchSummary(totalCount);
   }
   return `Showing ${COUNT_FORMATTER.format(visibleCount)} of ${COUNT_FORMATTER.format(totalCount)} matched photos`;
+}
+
+function formatBrowseProgressSummary(visibleCount: number, totalCount: number): string {
+  if (totalCount <= visibleCount) {
+    return `${COUNT_FORMATTER.format(totalCount)} photos`;
+  }
+  return `Showing ${COUNT_FORMATTER.format(visibleCount)} of ${COUNT_FORMATTER.format(totalCount)} photos`;
 }
 
 function humanizeMode(mode: string | null | undefined): string | null {
@@ -272,7 +283,7 @@ export function PhotoHuntingDashboard() {
     }
     return timelineMonths.reduce((total, month) => total + month.count, 0);
   }, [activeTripName, timelineMonths]);
-  const activeBrowseLimit = activeTripName ? TRIP_INITIAL_LIMIT : BROWSE_LIMIT;
+  const activeBrowseLimit = browseMonthKey ? MONTH_INITIAL_LIMIT : activeTripName ? TRIP_INITIAL_LIMIT : BROWSE_LIMIT;
   const themeSource = selectedDetail?.thumbnail_url ?? results[0]?.thumbnail_url ?? null;
 
   const focusSearchInput = useCallback(() => {
@@ -315,9 +326,8 @@ export function PhotoHuntingDashboard() {
         : `Showing ${COUNT_FORMATTER.format(displayedCount)} photos from ${activeTripName}.`;
     }
     if (!browseYear) {
-      const availableYears = libraryYears.length || yearGroups.length;
-      return availableYears
-        ? `Browsing ${COUNT_FORMATTER.format(availableYears)} years from your library.`
+      return displayedCount
+        ? `Showing ${COUNT_FORMATTER.format(displayedCount)} photos.`
         : "Browsing your library.";
     }
     if (selectedBrowseMonthEntry) {
@@ -331,7 +341,7 @@ export function PhotoHuntingDashboard() {
         : `Showing ${COUNT_FORMATTER.format(displayedCount)} photos from ${browseYear}.`;
     }
     return `Showing ${COUNT_FORMATTER.format(displayedCount)} photos from ${browseYear}.`;
-  }, [activeTripName, activeTripPhotoCount, browseMonthKey, browseYear, libraryYears.length, selectedBrowseMonthEntry, selectedBrowseYearEntry, yearGroups.length]);
+  }, [activeTripName, activeTripPhotoCount, browseMonthKey, browseYear, selectedBrowseMonthEntry, selectedBrowseYearEntry]);
 
   const handleViewportChange = useCallback((nextBbox: string, nextZoom: number) => {
     setMapViewportReady(true);
@@ -395,6 +405,12 @@ export function PhotoHuntingDashboard() {
 
   useEffect(() => {
     if (resultMode === "browse" && activeTripName && !browseYear && !browseMonthKey && results.length) {
+      setResultSummary(buildBrowseYearSummary(results.length));
+    }
+  }, [activeTripName, browseMonthKey, browseYear, buildBrowseYearSummary, resultMode, results.length]);
+
+  useEffect(() => {
+    if (resultMode === "browse" && !activeTripName && !browseYear && !browseMonthKey && results.length) {
       setResultSummary(buildBrowseYearSummary(results.length));
     }
   }, [activeTripName, browseMonthKey, browseYear, buildBrowseYearSummary, resultMode, results.length]);
@@ -602,11 +618,11 @@ export function PhotoHuntingDashboard() {
     if (typeof idleWindow.requestIdleCallback === "function") {
       idleId = idleWindow.requestIdleCallback(() => {
         setSecondaryDataEnabled(true);
-      }, { timeout: 1500 });
+      }, { timeout: 350 });
     } else {
       timeoutId = window.setTimeout(() => {
         setSecondaryDataEnabled(true);
-      }, 1200);
+      }, 250);
     }
     return () => {
       if (timeoutId !== null) {
@@ -627,6 +643,9 @@ export function PhotoHuntingDashboard() {
     let firstLoad = true;
 
     const loadAnalysisStats = () => {
+      if (document.hidden) {
+        return;
+      }
       controller?.abort();
       controller = new AbortController();
       if (firstLoad) {
@@ -863,6 +882,9 @@ export function PhotoHuntingDashboard() {
     let firstLoad = true;
 
     const loadScanStatus = () => {
+      if (document.hidden) {
+        return;
+      }
       controller?.abort();
       controller = new AbortController();
       if (firstLoad) {
@@ -940,7 +962,7 @@ export function PhotoHuntingDashboard() {
             setYearGroups([]);
             setResults(items);
             applySelection(items);
-            setResultSummary("Showing recent highlights from your library.");
+            setResultSummary(`Showing ${COUNT_FORMATTER.format(items.length)} recently added photos.`);
           });
         })
         .catch((reason: unknown) => {
@@ -1096,7 +1118,7 @@ export function PhotoHuntingDashboard() {
   }, [activeBrowseLimit, activeTripName, activeTripPhotoCount, analysisStatus, boundedYearEnd, boundedYearStart, browseContextKey, browseHasMore, browseLoadingMore, browseMonthKey, browseYear, buildBrowseYearSummary, city, country, mediaType, resultMode, results, resultsLoading, selectedBrowseMonthEntry, selectedBrowseYearEntry, tag]);
 
   useEffect(() => {
-    if (activeTripName || resultMode !== "browse" || (!browseMonthKey && !browseYear) || !browseHasMore || resultsLoading || browseLoadingMore) {
+    if (activeTripName || browseMonthKey || resultMode !== "browse" || (!browseMonthKey && !browseYear) || !browseHasMore || resultsLoading || browseLoadingMore) {
       return;
     }
 
@@ -1304,6 +1326,8 @@ export function PhotoHuntingDashboard() {
     ? selectedBrowseMonthEntry.count
     : resultMode === "browse" && browseYear && selectedYearEntry
       ? selectedYearEntry.count
+      : resultMode === "browse" && activeTripName && activeTripPhotoCount !== null
+        ? activeTripPhotoCount
       : results.length;
   const mapSummary = mapLoading
     ? "Loading visible map points..."
@@ -1314,31 +1338,42 @@ export function PhotoHuntingDashboard() {
     ? browseMonthKey ?? visibleTimelineMonthKey ?? formatMonthKey(selectedDetail?.date_taken ?? results[0]?.date_taken ?? null)
     : null;
   const scrubberItems = useMemo<ScrubberItem[]>(() => {
-    const source = timelineMonths.map((month, index) => ({
-      key: month.key,
-      label: month.label,
-      shortLabel:
-        index === 0 || timelineMonths[index - 1]?.year !== month.year
-          ? String(month.year)
-          : month.short_label,
-      anchorId: `month-${month.key}`,
-    }));
+    const source = timelineMonths.map((month, index) => {
+      const isYearMarker = index === 0 || timelineMonths[index - 1]?.year !== month.year;
+      return {
+        key: isYearMarker ? `year-${month.year}` : month.key,
+        label: isYearMarker ? String(month.year) : month.label,
+        shortLabel: isYearMarker ? String(month.year) : month.short_label,
+        anchorId: isYearMarker ? `year-${month.year}` : `month-${month.key}`,
+        kind: isYearMarker ? "year" as const : "month" as const,
+        year: month.year,
+        monthKey: month.key,
+      };
+    });
 
     return source.map((item, index) => ({
       ...item,
       progress: source.length <= 1 ? 0.5 : index / (source.length - 1),
     }));
   }, [timelineMonths]);
-  const activeScrubberKey = browseMonthKey ?? activeTimelineMonthKey ?? formatMonthKey(selectedDetail?.date_taken ?? results[0]?.date_taken ?? null);
+  const activeScrubberKey = browseMonthKey
+    ?? (browseYear ? `year-${browseYear}` : null)
+    ?? activeTimelineMonthKey
+    ?? formatMonthKey(selectedDetail?.date_taken ?? results[0]?.date_taken ?? null);
   const activeScrubberItem = useMemo(
-    () => scrubberItems.find((item) => item.key === activeScrubberKey) ?? scrubberItems[0] ?? null,
+    () => scrubberItems.find((item) => item.key === activeScrubberKey || item.monthKey === activeScrubberKey) ?? scrubberItems[0] ?? null,
     [activeScrubberKey, scrubberItems],
   );
   const scrubberHandleProgress = timelineHoverTop ?? activeScrubberItem?.progress ?? 0.5;
-  const applyScrubberMonth = useCallback((monthKey: string) => {
+  const applyScrubberSelection = useCallback((item: ScrubberItem) => {
     scrubberPreviewKeyRef.current = null;
-    setBrowseYear(null);
-    setBrowseMonthKey(monthKey);
+    if (item.kind === "year") {
+      setBrowseYear(item.year);
+      setBrowseMonthKey(null);
+    } else {
+      setBrowseYear(null);
+      setBrowseMonthKey(item.monthKey);
+    }
     setResultMode("browse");
     setActiveSearchRequest(null);
     setResultsError(null);
@@ -1395,10 +1430,13 @@ export function PhotoHuntingDashboard() {
     setScrubberDragging(false);
     const previewKey = scrubberPreviewKeyRef.current;
     if (previewKey) {
-      applyScrubberMonth(previewKey);
+      const previewItem = scrubberItems.find((item) => item.key === previewKey);
+      if (previewItem) {
+        applyScrubberSelection(previewItem);
+      }
     }
     clearTimelineHover(900);
-  }, [applyScrubberMonth, clearTimelineHover]);
+  }, [applyScrubberSelection, clearTimelineHover, scrubberItems]);
   const scanTone = scanStatusError
     ? "warning"
     : scanStatus?.running
@@ -1447,8 +1485,8 @@ export function PhotoHuntingDashboard() {
     ? "Loading..."
     : resultMode === "search"
       ? (searchTotalCount === null ? resultSummary : formatSearchProgressSummary(results.length, searchTotalCount))
-      : browseYear && selectedYearEntry
-        ? `Showing ${COUNT_FORMATTER.format(Math.min(activePhotoCount, results.length || activePhotoCount))} of ${COUNT_FORMATTER.format(activePhotoCount)} photos`
+      : browseMonthKey || activeTripName || (browseYear && selectedYearEntry)
+        ? formatBrowseProgressSummary(results.length, activePhotoCount)
         : `${COUNT_FORMATTER.format(results.length)} photos in view`;
   const searchPlaceholder = searchMode === "ai" ? "Ask anything about your memories..." : "Search by date, place, or person...";
 
@@ -1456,8 +1494,18 @@ export function PhotoHuntingDashboard() {
     <main className={`gpShell memoryStreamShell ${searchMode === "ai" ? "aiSearchMode" : "classicSearchMode"}`}>
       <header className="gpTopBar memoryTopBar">
         <div className="gpBrand">
-          <span className="gpBrandMark">Photo</span>
-          <span>Hunting</span>
+          <img
+            alt="Photo Hunting logo"
+            className="gpBrandLogo"
+            decoding="async"
+            height={52}
+            src="/photohunting-badge.png"
+            width={52}
+          />
+          <div className="gpBrandText">
+            <span className="gpBrandMark">Photo</span>
+            <span>Hunting</span>
+          </div>
         </div>
         <div className={`gpSearchBar memorySearchBar ${searchMode === "ai" ? "aiMode" : ""}`}>
           <button
@@ -1822,17 +1870,36 @@ export function PhotoHuntingDashboard() {
                   <div className="viewToggle" role="tablist" aria-label="Photo density">
                     <button
                       className={`viewToggleButton ${gridDensity === "comfortable" ? "active" : ""}`}
+                      aria-label="Comfortable view"
                       onClick={() => setGridDensity("comfortable")}
+                      title="Comfortable view"
                       type="button"
                     >
-                      Comfortable
+                      <span aria-hidden="true" className="viewToggleIcon viewToggleIconComfortable">
+                        <span />
+                        <span />
+                        <span />
+                        <span />
+                      </span>
                     </button>
                     <button
                       className={`viewToggleButton ${gridDensity === "compact" ? "active" : ""}`}
+                      aria-label="Compact view"
                       onClick={() => setGridDensity("compact")}
+                      title="Compact view"
                       type="button"
                     >
-                      Compact
+                      <span aria-hidden="true" className="viewToggleIcon viewToggleIconCompact">
+                        <span />
+                        <span />
+                        <span />
+                        <span />
+                        <span />
+                        <span />
+                        <span />
+                        <span />
+                        <span />
+                      </span>
                     </button>
                   </div>
                   <p>{photoSummary}</p>
@@ -1864,18 +1931,18 @@ export function PhotoHuntingDashboard() {
                 compactStoryStrip={resultMode === "browse"}
                 yearGroups={resultMode === "browse" && !browseYear ? yearGroups : []}
               />
-              {resultMode === "browse" && activeTripName && !resultsError ? (
+              {resultMode === "browse" && (activeTripName || browseMonthKey) && !resultsError ? (
                 <div className="browseLoadMore searchLoadMore">
                   {browseHasMore ? (
                     <button className="secondaryButton" onClick={loadMoreBrowseYear} type="button" disabled={browseLoadingMore}>
                       {browseLoadingMore ? "Loading more photos..." : "Show more"}
                     </button>
                   ) : results.length ? (
-                    <span>End of trip</span>
+                    <span>{browseMonthKey ? "End of month" : "End of trip"}</span>
                   ) : null}
                 </div>
               ) : null}
-              {resultMode === "browse" && browseYear && !activeTripName && !resultsError ? (
+              {resultMode === "browse" && browseYear && !browseMonthKey && !activeTripName && !resultsError ? (
                 <div className="browseLoadMore" ref={browseLoadMoreRef}>
                   {browseLoadingMore
                     ? "Loading more photos..."
@@ -1943,7 +2010,7 @@ export function PhotoHuntingDashboard() {
                 <button
                   className={`memoryYearButton scrubberMarker ${activeScrubberItem?.key === item.key ? "active" : ""}`}
                   key={item.key}
-                  onClick={() => applyScrubberMonth(item.key)}
+                  onClick={() => applyScrubberSelection(item)}
                   onFocus={() => handleTimelineHover(item.label, item.progress)}
                   onMouseEnter={() => handleTimelineHover(item.label, item.progress)}
                   style={{ top: `${item.progress * 100}%` }}
@@ -1966,7 +2033,10 @@ export function PhotoHuntingDashboard() {
               id="mobile-scrubber-select"
               onChange={(event) => {
                 setSecondaryDataEnabled(true);
-                applyScrubberMonth(event.target.value);
+                const nextItem = scrubberItems.find((item) => item.key === event.target.value);
+                if (nextItem) {
+                  applyScrubberSelection(nextItem);
+                }
               }}
               value={activeScrubberItem?.key ?? scrubberItems[0]?.key ?? ""}
             >

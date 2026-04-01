@@ -123,6 +123,20 @@ export type TripSummary = {
   cover?: MediaCard | null;
 };
 
+export type TVHomeResponse = {
+  recent_photos: MediaCard[];
+  recent_trips: TripSummary[];
+  trips_has_more: boolean;
+};
+
+export type TVPlaylistResponse = {
+  playlist_id: string;
+  title: string;
+  subtitle?: string | null;
+  total_count: number;
+  items: MediaCard[];
+};
+
 export type ScanStatus = {
   running: boolean;
   status: string;

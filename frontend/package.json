@@ -3,7 +3,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "next build && node scripts/postexport-tv.mjs",
     "start": "next start",
     "lint": "next lint"
   },
@@ -22,4 +22,3 @@
     "typescript": "^5.7.2"
   }
 }
-

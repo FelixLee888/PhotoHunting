@@ -1081,10 +1081,25 @@ textarea {
 .gpBrand {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 10px;
   font-size: 1.55rem;
   font-weight: 600;
   letter-spacing: -0.03em;
+}
+
+.gpBrandLogo {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+  box-shadow: 0 10px 24px rgba(35, 26, 12, 0.16);
+}
+
+.gpBrandText {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
 }
 
 .gpBrandMark {
@@ -1395,6 +1410,8 @@ textarea {
 .yearSection {
   display: grid;
   gap: 12px;
+  content-visibility: auto;
+  contain-intrinsic-size: 420px;
 }
 
 .yearSectionHeader {
@@ -1434,6 +1451,8 @@ textarea {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 18px;
+  content-visibility: auto;
+  contain-intrinsic-size: 340px;
 }
 
 .tripStoryStrip {
@@ -1444,6 +1463,8 @@ textarea {
   padding-bottom: 6px;
   scrollbar-width: none;
   scroll-snap-type: x proximity;
+  content-visibility: auto;
+  contain-intrinsic-size: 240px;
 }
 
 .tripStoryStrip::-webkit-scrollbar {
@@ -1541,11 +1562,15 @@ textarea {
 .feedDaySection {
   display: grid;
   gap: 10px;
+  content-visibility: auto;
+  contain-intrinsic-size: 520px;
 }
 
 .feedMonthSection {
   display: grid;
   gap: 14px;
+  content-visibility: auto;
+  contain-intrinsic-size: 760px;
 }
 
 .streamMonthHeader {
@@ -1565,6 +1590,7 @@ textarea {
 .photoTileGrid {
   display: grid;
   gap: 8px;
+  contain: layout paint style;
 }
 
 .photoTileGrid.comfortable {
@@ -1620,19 +1646,53 @@ textarea {
 }
 
 .viewToggleButton {
-  min-height: 34px;
-  padding: 7px 12px;
+  min-height: 36px;
+  min-width: 36px;
+  padding: 6px;
   border: 0;
   border-radius: 999px;
   background: transparent;
   color: var(--muted);
   font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .viewToggleButton.active {
   background: rgba(255, 255, 255, 0.96);
   color: var(--accent-deep);
   box-shadow: 0 8px 18px rgba(26, 28, 30, 0.08);
+}
+
+.viewToggleIcon {
+  display: grid;
+  gap: 2px;
+}
+
+.viewToggleIcon span {
+  display: block;
+  border-radius: 4px;
+  background: currentColor;
+  opacity: 0.92;
+}
+
+.viewToggleIconComfortable {
+  grid-template-columns: repeat(2, 8px);
+}
+
+.viewToggleIconComfortable span {
+  width: 8px;
+  height: 8px;
+}
+
+.viewToggleIconCompact {
+  grid-template-columns: repeat(3, 5px);
+}
+
+.viewToggleIconCompact span {
+  width: 5px;
+  height: 5px;
 }
 
 .photoTileImage {
@@ -2718,7 +2778,13 @@ textarea {
 
   .gpBrand {
     padding: 0 8px;
+    gap: 8px;
     font-size: 1.55rem;
+  }
+
+  .gpBrandLogo {
+    width: 42px;
+    height: 42px;
   }
 
   .gpSearchBar {
@@ -3056,5 +3122,623 @@ textarea {
   }
   50% {
     transform: translateY(-1px);
+  }
+}
+
+.tvModeShell {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 10px;
+  box-sizing: border-box;
+  min-height: 100vh;
+  height: 100vh;
+  max-height: 100vh;
+  padding: 16px 20px 18px;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at top left, rgba(143, 118, 255, 0.18), transparent 30%),
+    radial-gradient(circle at top right, rgba(255, 210, 92, 0.2), transparent 28%),
+    linear-gradient(180deg, #0b1120 0%, #111827 46%, #060c18 100%);
+  color: #f8fafc;
+}
+
+.tvBackdrop {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.tvBackdrop::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg, rgba(6, 12, 24, 0.25) 0%, rgba(6, 12, 24, 0.92) 68%, rgba(6, 12, 24, 0.98) 100%),
+    radial-gradient(circle at center, rgba(6, 12, 24, 0.05), rgba(6, 12, 24, 0.55));
+}
+
+.tvBackdropImage {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: blur(24px) saturate(1.1);
+  transform: scale(1.06);
+  opacity: 0.34;
+}
+
+.tvTopBar,
+.tvHome,
+.tvViewer {
+  position: relative;
+  z-index: 1;
+}
+
+.tvTopBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 0;
+  margin-bottom: 0;
+}
+
+.tvBrand {
+  display: inline-flex;
+  align-items: center;
+  gap: 16px;
+  text-decoration: none;
+  color: inherit;
+}
+
+.tvBrandLogo {
+  width: 48px;
+  height: 48px;
+  border-radius: 18px;
+  box-shadow: 0 18px 36px rgba(6, 12, 24, 0.25);
+}
+
+.tvBrand h1,
+.tvRowHeader h3,
+.tvHeroContent h2,
+.tvLoadingState h2,
+.tvViewerOverlay h2 {
+  margin: 0;
+}
+
+.tvBrand h1 {
+  font-size: clamp(1.55rem, 1.8vw, 2.1rem);
+  line-height: 1.1;
+}
+
+.tvEyebrow {
+  margin: 0 0 4px;
+  font-size: 0.76rem;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: rgba(226, 232, 240, 0.72);
+}
+
+.tvHome {
+  display: grid;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  gap: 10px;
+  align-content: stretch;
+}
+
+.tvViewerOverlay p,
+.tvRowHeader p,
+.tvPhotoMeta span,
+.tvTripMeta span {
+  margin: 0;
+  color: rgba(226, 232, 240, 0.82);
+}
+
+.tvPrimaryButton,
+.tvSecondaryButton,
+.tvNavButton,
+.tvAutoPlayButton,
+.tvViewerClose {
+  border: 0;
+  border-radius: 999px;
+  font: inherit;
+  cursor: pointer;
+  transition: transform 140ms ease, box-shadow 140ms ease, background 140ms ease;
+}
+
+.tvPrimaryButton,
+.tvSecondaryButton,
+.tvNavButton,
+.tvAutoPlayButton {
+  min-height: 52px;
+  padding: 0 20px;
+}
+
+.tvPrimaryButton {
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.82), rgba(236, 72, 153, 0.82));
+  color: white;
+  box-shadow: 0 18px 32px rgba(139, 92, 246, 0.28);
+}
+
+.tvTopAction {
+  min-width: 188px;
+  justify-self: end;
+}
+
+.tvSecondaryButton,
+.tvNavButton,
+.tvAutoPlayButton,
+.tvViewerClose {
+  background: rgba(15, 23, 42, 0.36);
+  color: white;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(16px);
+}
+
+.tvPrimaryButton:hover,
+.tvSecondaryButton:hover,
+.tvNavButton:hover,
+.tvAutoPlayButton:hover,
+.tvViewerClose:hover,
+.tvTripCard:hover,
+.tvPhotoCard:hover {
+  transform: translateY(-2px);
+}
+
+.tvPrimaryButton.focused,
+.tvNavButton.focused {
+  box-shadow: 0 0 0 4px rgba(248, 250, 252, 0.18);
+}
+
+.tvPrimaryButton:disabled,
+.tvSecondaryButton:disabled {
+  opacity: 0.45;
+  cursor: default;
+  transform: none;
+}
+
+.tvRowSection {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 10px;
+  height: 100%;
+  min-height: 0;
+  position: relative;
+  padding: 10px 12px 12px;
+  border-radius: 26px;
+  background: rgba(7, 13, 24, 0.52);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(14px);
+}
+
+.tvRowHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.tvCardRow {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-auto-rows: minmax(0, 1fr);
+  gap: 14px;
+  height: 100%;
+  min-height: 0;
+  align-content: stretch;
+}
+
+.tvTripsPagerButton {
+  position: absolute;
+  top: 50%;
+  z-index: 2;
+  width: 64px;
+  height: 64px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.22);
+  color: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(16px);
+  box-shadow: 0 18px 40px rgba(2, 6, 23, 0.24);
+  transform: translateY(-50%);
+  transition: transform 140ms ease, box-shadow 140ms ease, background 140ms ease, opacity 140ms ease;
+}
+
+.tvTripsPagerButton span {
+  font-size: 2.6rem;
+  line-height: 1;
+  transform: translateY(-2px);
+}
+
+.tvTripsPagerButtonPrev {
+  left: 18px;
+}
+
+.tvTripsPagerButtonNext {
+  right: 18px;
+}
+
+.tvTripsPagerButton:hover {
+  transform: translateY(-50%) scale(1.03);
+}
+
+.tvTripsPagerButton.focused {
+  background: rgba(15, 23, 42, 0.42);
+  box-shadow: 0 0 0 4px rgba(248, 250, 252, 0.18);
+}
+
+.tvTripsPagerButton:disabled {
+  opacity: 0.35;
+  cursor: default;
+  transform: translateY(-50%);
+}
+
+.tvTripCard,
+.tvPhotoCard {
+  position: relative;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 24px;
+  background: rgba(15, 23, 42, 0.38);
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.tvTripCard.focused,
+.tvPhotoCard.focused {
+  border-color: #f8fafc;
+  box-shadow: 0 0 0 4px rgba(248, 250, 252, 0.18);
+}
+
+.tvTripImage,
+.tvPhotoImage,
+.tvCardSkeleton {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: linear-gradient(135deg, rgba(148, 163, 184, 0.16), rgba(30, 41, 59, 0.64));
+}
+
+.tvTripImage,
+.tvCardSkeleton.trip {
+  aspect-ratio: auto;
+}
+
+.tvPhotoImage,
+.tvCardSkeleton.photo {
+  aspect-ratio: 16 / 9.2;
+}
+
+.tvTripOverlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0) 22%, rgba(15, 23, 42, 0.88) 100%);
+}
+
+.tvTripMeta,
+.tvPhotoMeta {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  left: 16px;
+  display: grid;
+  gap: 4px;
+}
+
+.tvTripMeta strong,
+.tvPhotoMeta strong {
+  font-size: 1.08rem;
+  line-height: 1.2;
+}
+
+.tvPhotoMeta {
+  position: static;
+  padding: 14px 14px 16px;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0), rgba(15, 23, 42, 0.64));
+}
+
+.tvTripPlaceholder,
+.tvPhotoPlaceholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2rem;
+  font-weight: 700;
+  color: rgba(248, 250, 252, 0.82);
+}
+
+.tvCardSkeleton {
+  border-radius: 24px;
+  animation: tvPulse 1.6s ease-in-out infinite;
+}
+
+.tvViewer {
+  position: relative;
+  z-index: 2;
+  height: calc(100vh - 20px);
+}
+
+.tvViewerStage {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 14px;
+  border-radius: 28px;
+  background: rgba(2, 6, 23, 0.38);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.tvViewerStage.chromeHidden {
+  cursor: none;
+}
+
+.tvViewerImage {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: 24px;
+  box-shadow: 0 40px 90px rgba(2, 6, 23, 0.52);
+}
+
+.tvViewerClose {
+  position: absolute;
+  top: 28px;
+  left: 28px;
+  z-index: 3;
+  min-height: 50px;
+  padding: 0 18px;
+}
+
+.tvViewerOverlay {
+  position: absolute;
+  right: 28px;
+  bottom: 28px;
+  left: 28px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 18px;
+  border-radius: 20px;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.015), rgba(15, 23, 42, 0.22));
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(4px);
+  box-shadow: 0 10px 24px rgba(2, 6, 23, 0.08);
+}
+
+.tvViewerClose,
+.tvViewerOverlay,
+.tvViewerControls {
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.tvViewerClose.hidden,
+.tvViewerOverlay.hidden,
+.tvViewerControls.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.tvViewerClose.hidden,
+.tvViewerControls.hidden {
+  transform: translateY(-8px);
+}
+
+.tvViewerOverlay.hidden {
+  transform: translateY(10px);
+}
+
+.tvViewerOverlay h2 {
+  font-size: clamp(1.35rem, 1.75vw, 1.8rem);
+  line-height: 1.08;
+  text-shadow: 0 2px 10px rgba(2, 6, 23, 0.45);
+}
+
+.tvViewerOverlay .tvEyebrow {
+  margin-bottom: 3px;
+  font-size: 0.68rem;
+  text-shadow: 0 2px 8px rgba(2, 6, 23, 0.38);
+}
+
+.tvViewerOverlay p {
+  font-size: 0.9rem;
+  text-shadow: 0 2px 8px rgba(2, 6, 23, 0.38);
+}
+
+.tvViewerStatus {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.tvViewerStatus span {
+  font-size: 0.94rem;
+}
+
+.tvAutoPlayButton.active {
+  background: rgba(139, 92, 246, 0.26);
+  border-color: rgba(196, 181, 253, 0.62);
+}
+
+.tvViewerControls {
+  position: absolute;
+  right: 28px;
+  top: 28px;
+  display: inline-flex;
+  gap: 12px;
+}
+
+.tvAlbumBrowser {
+  position: absolute;
+  inset: 96px 24px 24px;
+  z-index: 3;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 16px;
+  padding: 24px 24px 20px;
+  border-radius: 24px;
+  background: linear-gradient(180deg, rgba(7, 13, 24, 0.72), rgba(7, 13, 24, 0.9));
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 28px 72px rgba(2, 6, 23, 0.42);
+  overflow: hidden;
+}
+
+.tvAlbumBrowserHeader {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.tvAlbumBrowserHeader h2 {
+  margin: 6px 0 8px;
+  font-size: clamp(1.8rem, 2.4vw, 2.7rem);
+  line-height: 1.06;
+}
+
+.tvAlbumBrowserHeader p:last-child {
+  margin: 0;
+  color: rgba(226, 232, 240, 0.82);
+}
+
+.tvAlbumBrowserActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.tvAlbumBrowserGrid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+  overflow: auto;
+  padding-right: 6px;
+}
+
+.tvAlbumThumb {
+  position: relative;
+  overflow: hidden;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 20px;
+  background: rgba(15, 23, 42, 0.42);
+  color: inherit;
+  text-align: left;
+}
+
+.tvAlbumThumb.focused {
+  border-color: #f8fafc;
+  box-shadow: 0 0 0 4px rgba(248, 250, 252, 0.18);
+}
+
+.tvAlbumThumbImage {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  background: linear-gradient(135deg, rgba(148, 163, 184, 0.16), rgba(30, 41, 59, 0.64));
+}
+
+.tvAlbumBrowserError {
+  margin: 0;
+}
+
+.tvAlbumBrowserLoading {
+  position: absolute;
+  inset: 24px;
+}
+
+.tvLoadingState,
+.tvError {
+  padding: 26px 28px;
+  border-radius: 24px;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+@keyframes tvPulse {
+  0%,
+  100% {
+    opacity: 0.52;
+  }
+  50% {
+    opacity: 0.92;
+  }
+}
+
+@media (max-width: 1200px) {
+  .tvModeShell {
+    padding: 22px 24px 28px;
+  }
+
+  .tvHeroCard {
+    grid-template-columns: 1fr;
+  }
+
+  .tvCardRow {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .tvAlbumBrowserGrid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .tvTopBar,
+  .tvRowHeader,
+  .tvViewerOverlay {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .tvTopAction {
+    justify-self: stretch;
+    width: 100%;
+  }
+
+  .tvCardRow {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .tvAlbumBrowser {
+    inset: 88px 18px 18px;
+  }
+
+  .tvAlbumBrowserHeader,
+  .tvAlbumBrowserActions {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .tvAlbumBrowserGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .tvViewerControls {
+    top: 20px;
+    right: 20px;
+  }
+
+  .tvViewerClose,
+  .tvViewerOverlay {
+    left: 20px;
+    right: 20px;
   }
 }

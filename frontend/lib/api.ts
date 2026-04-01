@@ -1,4 +1,6 @@
-import type { AnalysisStats, LibraryStats, LibraryYear, MapResponse, MediaCard, MediaDetail, ScanStatus, SearchRequest, SearchResponse, TimelineMonth, TripSummary, YearMediaGroup } from "./types";
+import type { AnalysisStats, LibraryStats, LibraryYear, MapResponse, MediaCard, MediaDetail, ScanStatus, SearchRequest, SearchResponse, TimelineMonth, TripSummary, TVHomeResponse, TVPlaylistResponse, YearMediaGroup } from "./types";
+
+const MONTHS_CACHE_TTL_MS = 60_000;
 
 function resolveApiBase(): string {
   const configuredBase = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
@@ -13,6 +15,56 @@ function resolveApiBase(): string {
 
 export function mediaStreamUrl(mediaId: string): string {
   return `${resolveApiBase()}/media/${mediaId}/stream`;
+}
+
+export function mediaPreviewUrl(mediaId: string, variant: "default" | "tv" = "default"): string {
+  const suffix = variant === "tv" ? "/preview/tv" : "/preview";
+  return `${resolveApiBase()}/media/${mediaId}${suffix}`;
+}
+
+export async function fetchTVHome(params?: {
+  recentLimit?: number;
+  tripLimit?: number;
+  tripOffset?: number;
+  analysisStatus?: string;
+}, signal?: AbortSignal): Promise<TVHomeResponse> {
+  const query = new URLSearchParams();
+  if (params?.recentLimit) query.set("recent_limit", String(params.recentLimit));
+  if (params?.tripLimit) query.set("trip_limit", String(params.tripLimit));
+  if (params?.tripOffset) query.set("trip_offset", String(params.tripOffset));
+  if (params?.analysisStatus) query.set("analysis_status", params.analysisStatus);
+  const response = await fetch(`${resolveApiBase()}/tv/home?${query.toString()}`, {
+    cache: "no-store",
+    signal,
+  });
+  if (!response.ok) {
+    throw new Error(`TV home request failed with ${response.status}`);
+  }
+  return response.json();
+}
+
+export async function fetchTVPlaylist(params: {
+  kind: "recent" | "trip";
+  tripName?: string;
+  limit?: number;
+  offset?: number;
+  analysisStatus?: string;
+}, signal?: AbortSignal): Promise<TVPlaylistResponse> {
+  const query = new URLSearchParams();
+  if (params.limit) query.set("limit", String(params.limit));
+  if (params.offset) query.set("offset", String(params.offset));
+  if (params.analysisStatus) query.set("analysis_status", params.analysisStatus);
+  const endpoint = params.kind === "trip" && params.tripName
+    ? `${resolveApiBase()}/tv/playlists/trips/${encodeURIComponent(params.tripName)}`
+    : `${resolveApiBase()}/tv/playlists/recent`;
+  const response = await fetch(`${endpoint}?${query.toString()}`, {
+    cache: "no-store",
+    signal,
+  });
+  if (!response.ok) {
+    throw new Error(`TV playlist request failed with ${response.status}`);
+  }
+  return response.json();
 }
 
 export async function searchMedia(request: SearchRequest, signal?: AbortSignal): Promise<SearchResponse> {
@@ -168,14 +220,45 @@ export async function fetchMediaMonths(params: {
   if (params.dateFrom) query.set("date_from", params.dateFrom);
   if (params.dateTo) query.set("date_to", params.dateTo);
 
-  const response = await fetch(`${resolveApiBase()}/media/months?${query.toString()}`, {
-    cache: "no-store",
+  const queryString = query.toString();
+  const cacheKey = `photohunting:months:${queryString}`;
+  if (typeof window !== "undefined") {
+    try {
+      const cached = window.sessionStorage.getItem(cacheKey);
+      if (cached) {
+        const payload = JSON.parse(cached) as { savedAt?: number; data?: TimelineMonth[] };
+        if (
+          payload.savedAt
+          && Array.isArray(payload.data)
+          && Date.now() - payload.savedAt < MONTHS_CACHE_TTL_MS
+        ) {
+          return payload.data;
+        }
+      }
+    } catch {
+      // Ignore sessionStorage read issues and fall back to the network.
+    }
+  }
+
+  const response = await fetch(`${resolveApiBase()}/media/months?${queryString}`, {
+    cache: "default",
     signal,
   });
   if (!response.ok) {
     throw new Error(`Media months request failed with ${response.status}`);
   }
-  return response.json();
+  const months = await response.json();
+  if (typeof window !== "undefined") {
+    try {
+      window.sessionStorage.setItem(cacheKey, JSON.stringify({
+        savedAt: Date.now(),
+        data: months,
+      }));
+    } catch {
+      // Ignore sessionStorage write issues.
+    }
+  }
+  return months;
 }
 
 export async function fetchTripSummaries(params: {

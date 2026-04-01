@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     app_name: str = "Photo Hunting API"
     api_prefix: str = "/api"
     database_url: str = "sqlite:///./data/photohunting.db"
-    backend_cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000"])
+    backend_cors_origins: list[str] = Field(default_factory=lambda: ["*"])
     media_roots: list[str] = Field(default_factory=list)
     qdrant_url: str = "http://localhost:6333"
     qdrant_collection_prefix: str = "photohunting"
@@ -37,7 +37,18 @@ class Settings(BaseSettings):
     preview_cache_dir: str = "./data/previews"
     preview_max_dimension: int = 480
     preview_jpeg_quality: int = 72
+    tv_preview_max_dimension: int = 1920
+    tv_preview_jpeg_quality: int = 84
     seed_demo_data: bool = True
+    dlna_enabled: bool = True
+    dlna_advertise_host: str | None = None
+    dlna_port: int = 8000
+    dlna_friendly_name: str = "Photo Hunting"
+    dlna_ssdp_port: int = 1900
+    dlna_notify_interval_seconds: int = 900
+    dlna_cache_max_age_seconds: int = 1800
+    dlna_content_limit: int = 200
+    dlna_recent_window_size: int = 300
 
     @field_validator("backend_cors_origins", "media_roots", mode="before")
     @classmethod

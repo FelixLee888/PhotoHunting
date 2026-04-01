@@ -64,6 +64,7 @@ def ensure_sqlite_indexes() -> None:
         "CREATE INDEX IF NOT EXISTS idx_media_active_type_date ON media_items (deleted_at, media_type, date_taken DESC)",
         "CREATE INDEX IF NOT EXISTS idx_media_active_geo ON media_items (deleted_at, latitude, longitude)",
         "CREATE INDEX IF NOT EXISTS idx_media_trip_active_date ON media_items (deleted_at, trip_name, date_taken DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_media_tv_trip_summary ON media_items (deleted_at, media_type, analysis_status, trip_name, date_taken ASC, indexed_at ASC)",
         "CREATE INDEX IF NOT EXISTS idx_media_analysis_queue ON media_items (deleted_at, media_type, analysis_status, analysis_heartbeat_at)",
         "CREATE INDEX IF NOT EXISTS idx_media_analysis_worker ON media_items (analysis_status, analysis_worker_id, analysis_heartbeat_at)",
         "CREATE INDEX IF NOT EXISTS idx_media_analysis_pending_scan ON media_items (deleted_at, media_type, analysis_status, indexed_at ASC, id)",

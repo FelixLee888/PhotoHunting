@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, time
 from pathlib import Path
+from time import monotonic
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
@@ -17,6 +18,14 @@ from app.services.previews import ensure_preview, preview_url_for_media
 
 router = APIRouter(prefix="/media", tags=["media"])
 COMPACT_CAPTION_LIMIT = 160
+YEARS_CACHE_TTL_SECONDS = 120.0
+MONTHS_CACHE_TTL_SECONDS = 45.0
+YEAR_GROUPS_CACHE_TTL_SECONDS = 120.0
+TRIPS_CACHE_TTL_SECONDS = 120.0
+_years_cache: dict[tuple[object, ...], tuple[float, list[LibraryYear]]] = {}
+_months_cache: dict[tuple[object, ...], tuple[float, list[TimelineMonth]]] = {}
+_year_groups_cache: dict[tuple[object, ...], tuple[float, list[YearMediaGroup]]] = {}
+_trips_cache: dict[tuple[object, ...], tuple[float, list[TripSummary]]] = {}
 
 
 def _build_media_conditions(
@@ -82,6 +91,17 @@ def _compact_caption(value: str | None) -> str:
     if len(text) <= COMPACT_CAPTION_LIMIT:
         return text
     return f"{text[: COMPACT_CAPTION_LIMIT - 3].rstrip()}..."
+
+
+def _prune_timed_cache(cache: dict[tuple[object, ...], tuple[float, object]], ttl_seconds: float) -> None:
+    now = monotonic()
+    expired_keys = [
+        key
+        for key, entry in cache.items()
+        if now - entry[0] >= ttl_seconds
+    ]
+    for key in expired_keys:
+        cache.pop(key, None)
 
 
 def _recent_ordering():
@@ -206,6 +226,22 @@ def list_media_years(
     date_to: date | None = None,
     db: Session = Depends(get_db),
 ):
+    cache_key = (
+        media_type,
+        analysis_status,
+        trip_name,
+        country,
+        region,
+        city,
+        tag,
+        date_from.isoformat() if date_from else None,
+        date_to.isoformat() if date_to else None,
+    )
+    now = monotonic()
+    cached_entry = _years_cache.get(cache_key)
+    if cached_entry and now - cached_entry[0] < YEARS_CACHE_TTL_SECONDS:
+        return cached_entry[1]
+
     conditions = _build_media_conditions(
         media_type=media_type,
         analysis_status=analysis_status,
@@ -227,7 +263,10 @@ def list_media_years(
         .order_by(year_expr.desc())
     ).all()
 
-    return [LibraryYear(year=row.year, count=row.count) for row in rows if row.year is not None]
+    years = [LibraryYear(year=row.year, count=row.count) for row in rows if row.year is not None]
+    _prune_timed_cache(_years_cache, YEARS_CACHE_TTL_SECONDS)
+    _years_cache[cache_key] = (now, years)
+    return years
 
 
 @router.get("/months", response_model=list[TimelineMonth])
@@ -244,6 +283,23 @@ def list_media_months(
     date_to: date | None = None,
     db: Session = Depends(get_db),
 ):
+    cache_key = (
+        year,
+        media_type,
+        analysis_status,
+        trip_name,
+        country,
+        region,
+        city,
+        tag,
+        date_from.isoformat() if date_from else None,
+        date_to.isoformat() if date_to else None,
+    )
+    now = monotonic()
+    cached_entry = _months_cache.get(cache_key)
+    if cached_entry and now - cached_entry[0] < MONTHS_CACHE_TTL_SECONDS:
+        return cached_entry[1]
+
     conditions = _build_media_conditions(
         media_type=media_type,
         analysis_status=analysis_status,
@@ -292,6 +348,15 @@ def list_media_months(
                 count=row.count,
             )
         )
+    if len(_months_cache) > 48:
+        expired_keys = [
+            key
+            for key, entry in _months_cache.items()
+            if now - entry[0] >= MONTHS_CACHE_TTL_SECONDS
+        ]
+        for key in expired_keys:
+            _months_cache.pop(key, None)
+    _months_cache[cache_key] = (now, timeline_months)
     return timeline_months
 
 
@@ -309,6 +374,23 @@ def list_media_year_groups(
     date_to: date | None = None,
     db: Session = Depends(get_db),
 ):
+    cache_key = (
+        per_year,
+        media_type,
+        analysis_status,
+        trip_name,
+        country,
+        region,
+        city,
+        tag,
+        date_from.isoformat() if date_from else None,
+        date_to.isoformat() if date_to else None,
+    )
+    now = monotonic()
+    cached_entry = _year_groups_cache.get(cache_key)
+    if cached_entry and now - cached_entry[0] < YEAR_GROUPS_CACHE_TTL_SECONDS:
+        return cached_entry[1]
+
     base_conditions = _build_media_conditions(
         media_type=media_type,
         analysis_status=analysis_status,
@@ -387,6 +469,8 @@ def list_media_year_groups(
                 items=items_by_year.get(year, []),
             )
         )
+    _prune_timed_cache(_year_groups_cache, YEAR_GROUPS_CACHE_TTL_SECONDS)
+    _year_groups_cache[cache_key] = (now, groups)
     return groups
 
 
@@ -403,6 +487,21 @@ def list_media_trips(
     date_to: date | None = None,
     db: Session = Depends(get_db),
 ):
+    cache_key = (
+        media_type,
+        analysis_status,
+        country,
+        region,
+        city,
+        tag,
+        date_from.isoformat() if date_from else None,
+        date_to.isoformat() if date_to else None,
+    )
+    now = monotonic()
+    cached_entry = _trips_cache.get(cache_key)
+    if cached_entry and now - cached_entry[0] < TRIPS_CACHE_TTL_SECONDS:
+        return cached_entry[1][:limit]
+
     base_conditions = _build_media_conditions(
         media_type=media_type,
         analysis_status=analysis_status,
@@ -415,72 +514,76 @@ def list_media_trips(
     )
     trip_conditions = [*base_conditions, MediaItem.trip_name.is_not(None)]
 
-    latest_date_expr = func.max(func.coalesce(MediaItem.date_taken, MediaItem.indexed_at))
     trip_rows = db.execute(
         select(
-            MediaItem.trip_name.label("trip_name"),
-            func.count(MediaItem.id).label("count"),
-            latest_date_expr.label("latest_date"),
+            MediaItem.id,
+            MediaItem.filename,
+            MediaItem.source_path,
+            MediaItem.media_type,
+            MediaItem.caption,
+            MediaItem.country,
+            MediaItem.region,
+            MediaItem.city,
+            MediaItem.place,
+            MediaItem.landmark,
+            MediaItem.latitude,
+            MediaItem.longitude,
+            MediaItem.thumbnail_url,
+            MediaItem.date_taken,
+            MediaItem.duration,
+            MediaItem.trip_name,
+            MediaItem.analysis_status,
+            MediaItem.analysis_completed_at,
+            MediaItem.analysis_model,
+            MediaItem.analysis_version,
+            MediaItem.indexed_at,
         )
         .where(and_(*trip_conditions))
-        .group_by(MediaItem.trip_name)
-        .order_by(latest_date_expr.desc(), MediaItem.trip_name.asc())
-        .limit(limit)
     ).all()
 
-    trip_names = [row.trip_name for row in trip_rows if row.trip_name]
-    if not trip_names:
+    if not trip_rows:
+        _prune_timed_cache(_trips_cache, TRIPS_CACHE_TTL_SECONDS)
+        _trips_cache[cache_key] = (now, [])
         return []
 
-    cover_subquery = (
-        select(
-            MediaItem.id.label("id"),
-            MediaItem.filename.label("filename"),
-            MediaItem.source_path.label("source_path"),
-            MediaItem.media_type.label("media_type"),
-            MediaItem.caption.label("caption"),
-            MediaItem.country.label("country"),
-            MediaItem.region.label("region"),
-            MediaItem.city.label("city"),
-            MediaItem.place.label("place"),
-            MediaItem.landmark.label("landmark"),
-            MediaItem.latitude.label("latitude"),
-            MediaItem.longitude.label("longitude"),
-            MediaItem.thumbnail_url.label("thumbnail_url"),
-            MediaItem.date_taken.label("date_taken"),
-            MediaItem.duration.label("duration"),
-            MediaItem.trip_name.label("trip_name"),
-            MediaItem.analysis_status.label("analysis_status"),
-            MediaItem.analysis_completed_at.label("analysis_completed_at"),
-            MediaItem.analysis_model.label("analysis_model"),
-            MediaItem.analysis_version.label("analysis_version"),
-            func.row_number()
-            .over(partition_by=MediaItem.trip_name, order_by=_earliest_ordering())
-            .label("row_number"),
-        )
-        .where(and_(*trip_conditions), MediaItem.trip_name.in_(trip_names))
-        .subquery()
-    )
+    summaries_by_trip: dict[str, dict[str, object]] = {}
+    for row in trip_rows:
+        trip_name = _row_value(row, "trip_name")
+        if not trip_name:
+            continue
+        row_date = _row_value(row, "date_taken") or _row_value(row, "indexed_at")
+        summary = summaries_by_trip.get(trip_name)
+        if summary is None:
+            summaries_by_trip[trip_name] = {
+                "count": 1,
+                "latest_date": row_date,
+                "earliest_date": row_date,
+                "cover": _media_card_from_row(row, compact=True),
+            }
+            continue
+        summary["count"] = int(summary["count"]) + 1
+        latest_date = summary["latest_date"]
+        earliest_date = summary["earliest_date"]
+        if row_date is not None and (latest_date is None or row_date > latest_date):
+            summary["latest_date"] = row_date
+        if row_date is not None and (earliest_date is None or row_date < earliest_date):
+            summary["earliest_date"] = row_date
+            summary["cover"] = _media_card_from_row(row, compact=True)
 
-    cover_rows = db.execute(
-        select(cover_subquery).where(cover_subquery.c.row_number == 1)
-    ).all()
-    covers_by_trip = {
-        _row_value(row, "trip_name"): _media_card_from_row(row, compact=True)
-        for row in cover_rows
-        if _row_value(row, "trip_name")
-    }
-
-    return [
+    sorted_summaries = sorted(summaries_by_trip.items(), key=lambda item: item[0])
+    sorted_summaries.sort(key=lambda item: item[1]["earliest_date"], reverse=True)
+    summaries = [
         TripSummary(
-            trip_name=row.trip_name,
-            count=row.count,
-            latest_date=row.latest_date,
-            cover=covers_by_trip.get(row.trip_name),
+            trip_name=trip_name,
+            count=int(summary["count"]),
+            latest_date=summary["latest_date"],
+            cover=summary["cover"],
         )
-        for row in trip_rows
-        if row.trip_name
+        for trip_name, summary in sorted_summaries
     ]
+    _prune_timed_cache(_trips_cache, TRIPS_CACHE_TTL_SECONDS)
+    _trips_cache[cache_key] = (now, summaries)
+    return summaries[:limit]
 
 
 @router.get("/{media_id}", response_model=MediaDetail)
@@ -550,6 +653,25 @@ def preview_media(
     preview_path = ensure_preview(item, settings)
     if not preview_path:
         raise HTTPException(status_code=404, detail="Preview image is not available.")
+    return FileResponse(
+        preview_path,
+        media_type="image/jpeg",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
+@router.get("/{media_id}/preview/tv")
+def preview_media_tv(
+    media_id: str,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(settings_dependency),
+):
+    item = db.get(MediaItem, media_id)
+    if not item or item.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="Media item not found.")
+    preview_path = ensure_preview(item, settings, variant="tv")
+    if not preview_path:
+        raise HTTPException(status_code=404, detail="TV preview image is not available.")
     return FileResponse(
         preview_path,
         media_type="image/jpeg",

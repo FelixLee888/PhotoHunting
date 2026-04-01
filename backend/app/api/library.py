@@ -18,7 +18,7 @@ from app.models import MediaItem
 from app.schemas.library import LibraryStatsResponse, ScanStatusResponse
 
 router = APIRouter(prefix="/library", tags=["library"])
-STATS_CACHE_TTL_SECONDS = 20.0
+STATS_CACHE_TTL_SECONDS = 120.0
 _stats_cache: tuple[float, LibraryStatsResponse] | None = None
 
 

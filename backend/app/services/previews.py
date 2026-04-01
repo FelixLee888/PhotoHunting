@@ -25,15 +25,19 @@ def preview_url_for_media(
     media_type: str | None,
     analysis_status: str | None,
     thumbnail_url: str | None = None,
+    *,
+    variant: str = "default",
 ) -> str | None:
     if thumbnail_url:
         return thumbnail_url
     if media_type == "image" and analysis_status == "completed":
+        if variant == "tv":
+            return f"/api/media/{media_id}/preview/tv"
         return f"/api/media/{media_id}/preview"
     return None
 
 
-def ensure_preview(item: MediaItem, settings: Settings) -> Path | None:
+def ensure_preview(item: MediaItem, settings: Settings, *, variant: str = "default") -> Path | None:
     if item.media_type != "image" or item.analysis_status != "completed":
         return None
 
@@ -47,7 +51,8 @@ def ensure_preview(item: MediaItem, settings: Settings) -> Path | None:
     cache_dir.mkdir(parents=True, exist_ok=True)
 
     checksum = (item.checksum or "preview")[:16]
-    preview_path = cache_dir / f"{item.id}-{checksum}.jpg"
+    suffix = "tv" if variant == "tv" else "preview"
+    preview_path = cache_dir / f"{item.id}-{checksum}-{suffix}.jpg"
     if preview_path.exists():
         return preview_path
 
@@ -57,7 +62,8 @@ def ensure_preview(item: MediaItem, settings: Settings) -> Path | None:
 
     try:
         image = ImageOps.exif_transpose(image)
-        image.thumbnail((settings.preview_max_dimension, settings.preview_max_dimension))
+        max_dimension, jpeg_quality = _preview_settings(settings, variant)
+        image.thumbnail((max_dimension, max_dimension))
         if image.mode in {"RGBA", "LA"}:
             background = Image.new("RGB", image.size, (255, 255, 255))
             alpha = image.getchannel("A") if "A" in image.getbands() else None
@@ -65,10 +71,16 @@ def ensure_preview(item: MediaItem, settings: Settings) -> Path | None:
             image = background
         elif image.mode != "RGB":
             image = image.convert("RGB")
-        image.save(preview_path, format="JPEG", quality=settings.preview_jpeg_quality, optimize=True)
+        image.save(preview_path, format="JPEG", quality=jpeg_quality, optimize=True)
         return preview_path
     finally:
         image.close()
+
+
+def _preview_settings(settings: Settings, variant: str) -> tuple[int, int]:
+    if variant == "tv":
+        return settings.tv_preview_max_dimension, settings.tv_preview_jpeg_quality
+    return settings.preview_max_dimension, settings.preview_jpeg_quality
 
 
 def _load_image(path: Path) -> Image.Image | None:
