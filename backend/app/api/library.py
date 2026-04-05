@@ -16,10 +16,16 @@ from app.core.config import Settings
 from app.db.session import get_db
 from app.models import MediaItem
 from app.schemas.library import LibraryStatsResponse, ScanStatusResponse
+from app.services.summary_store import get_materialized_totals
 
 router = APIRouter(prefix="/library", tags=["library"])
-STATS_CACHE_TTL_SECONDS = 120.0
+STATS_CACHE_TTL_SECONDS = 900.0
 _stats_cache: tuple[float, LibraryStatsResponse] | None = None
+
+
+def invalidate_library_stats_cache() -> None:
+    global _stats_cache
+    _stats_cache = None
 
 
 @router.get("/stats", response_model=LibraryStatsResponse)
@@ -28,6 +34,20 @@ def get_library_stats(db: Session = Depends(get_db)):
     now = monotonic()
     if _stats_cache and now - _stats_cache[0] < STATS_CACHE_TTL_SECONDS:
         return _stats_cache[1]
+
+    materialized_totals = get_materialized_totals(db)
+    if materialized_totals:
+        response = LibraryStatsResponse(
+            indexed_media=int(materialized_totals.get("indexed_media") or 0),
+            indexed_images=int(materialized_totals.get("indexed_images") or 0),
+            indexed_videos=int(materialized_totals.get("indexed_videos") or 0),
+            mapped_media=int(materialized_totals.get("mapped_media") or 0),
+            trip_routes=int(materialized_totals.get("trip_routes") or 0),
+            last_indexed_at=materialized_totals.get("last_indexed_at"),
+            available_years=[],
+        )
+        _stats_cache = (now, response)
+        return response
 
     active_items = MediaItem.deleted_at.is_(None)
     mapped_items = MediaItem.latitude.is_not(None) & MediaItem.longitude.is_not(None)

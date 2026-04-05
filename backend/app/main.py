@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
+from time import monotonic
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,6 +27,15 @@ from app.db.session import Base, SessionLocal, engine, ensure_sqlite_indexes, en
 from app.models import MediaItem
 from app.services.demo_seed import seed_demo_data
 from app.services.dlna import DLNAManager
+from app.services.summary_store import (
+    ensure_materialized_summary_schema,
+    has_active_analysis_workers,
+    materialized_summaries_need_bootstrap,
+    prewarm_runtime_caches,
+    rebuild_materialized_summaries,
+    run_sqlite_analyze,
+    run_sqlite_optimize,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +49,47 @@ def _should_run_sqlite_startup_maintenance(settings) -> bool:
         return True
     database_path = Path(settings.database_url.removeprefix("sqlite:///")).expanduser()
     return not database_path.exists() or database_path.stat().st_size == 0
+
+
+async def _background_sqlite_maintenance_loop(settings) -> None:
+    last_optimize_at = monotonic()
+    last_analyze_at = monotonic()
+    interval_seconds = max(30, settings.summary_prewarm_interval_seconds)
+
+    while True:
+        await asyncio.sleep(interval_seconds)
+        try:
+            with SessionLocal() as db:
+                if settings.summary_prewarm_enabled and has_active_analysis_workers(
+                    db,
+                    settings.analysis_claim_stale_minutes,
+                ):
+                    prewarm_runtime_caches(db)
+        except OperationalError as exc:
+            if not _is_transient_sqlite_lock(exc):
+                logger.exception("Background prewarm failed")
+            else:
+                logger.warning("Skipping background prewarm because the database is locked: %s", exc)
+        except Exception:
+            logger.exception("Background prewarm failed")
+
+        if settings.database_url.startswith("sqlite:///"):
+            try:
+                with engine.begin() as connection:
+                    now = monotonic()
+                    if now - last_optimize_at >= max(300, settings.sqlite_optimize_interval_seconds):
+                        run_sqlite_optimize(connection)
+                        last_optimize_at = now
+                    if now - last_analyze_at >= max(1800, settings.sqlite_analyze_interval_seconds):
+                        run_sqlite_analyze(connection)
+                        last_analyze_at = now
+            except OperationalError as exc:
+                if not _is_transient_sqlite_lock(exc):
+                    logger.exception("Background SQLite maintenance failed")
+                else:
+                    logger.warning("Skipping background SQLite maintenance because the database is locked: %s", exc)
+            except Exception:
+                logger.exception("Background SQLite maintenance failed")
 
 
 @asynccontextmanager
@@ -55,6 +107,19 @@ async def lifespan(_: FastAPI):
             logger.warning("Skipping SQLite startup maintenance because the database is locked: %s", exc)
     else:
         logger.info("Skipping SQLite startup maintenance for existing database %s", settings.database_url)
+    try:
+        ensure_sqlite_indexes()
+        if settings.materialized_summary_enabled and settings.database_url.startswith("sqlite:///"):
+            with engine.begin() as connection:
+                ensure_materialized_summary_schema(connection)
+                if materialized_summaries_need_bootstrap(connection):
+                    logger.info("Bootstrapping materialized media summaries")
+                    rebuild_materialized_summaries(connection)
+                run_sqlite_optimize(connection)
+    except OperationalError as exc:
+        if not _is_transient_sqlite_lock(exc):
+            raise
+        logger.warning("Skipping SQLite summary bootstrap because the database is locked: %s", exc)
     vector_store = get_vector_store()
     vector_store.ensure_collections(settings.embedding_dimensions)
     with SessionLocal() as db:
@@ -64,8 +129,26 @@ async def lifespan(_: FastAPI):
             for item in db.query(MediaItem).all():
                 vector_store.upsert_media(item)
                 vector_store.upsert_segments(item)
+        if settings.summary_prewarm_enabled:
+            try:
+                prewarm_runtime_caches(db)
+            except OperationalError as exc:
+                if not _is_transient_sqlite_lock(exc):
+                    raise
+                logger.warning("Skipping startup prewarm because the database is locked: %s", exc)
     dlna_manager.start()
+    maintenance_task = None
+    if settings.database_url.startswith("sqlite:///") and (
+        settings.summary_prewarm_enabled or settings.sqlite_optimize_interval_seconds > 0
+    ):
+        maintenance_task = asyncio.create_task(_background_sqlite_maintenance_loop(settings))
     yield
+    if maintenance_task is not None:
+        maintenance_task.cancel()
+        try:
+            await maintenance_task
+        except asyncio.CancelledError:
+            pass
     dlna_manager.stop()
 
 

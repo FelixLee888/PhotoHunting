@@ -16,16 +16,24 @@ from app.api.media import (
     _media_card_from_row,
     _recent_ordering,
     _row_value,
+    _trip_summary_cover_rows,
+    _load_media_cards_by_ids,
 )
 from app.db.session import get_db
 from app.models import MediaItem
 from app.schemas.tv import TVHomeResponse, TVMediaCard, TVPlaylistResponse, TVTripSummary
+from app.services.summary_store import list_materialized_trips
 
 router = APIRouter(prefix="/tv", tags=["tv"])
-TV_HOME_CACHE_TTL_SECONDS = 120.0
-TV_TRIP_SUMMARY_CACHE_TTL_SECONDS = 120.0
+TV_HOME_CACHE_TTL_SECONDS = 900.0
+TV_TRIP_SUMMARY_CACHE_TTL_SECONDS = 900.0
 _tv_home_cache: dict[tuple[object, ...], tuple[float, TVHomeResponse]] = {}
 _tv_trip_summary_cache: dict[tuple[object, ...], tuple[float, list[TVTripSummary]]] = {}
+
+
+def invalidate_tv_home_caches() -> None:
+    _tv_home_cache.clear()
+    _tv_trip_summary_cache.clear()
 
 
 def _tv_card_from_media_card(card) -> TVMediaCard:
@@ -138,6 +146,8 @@ def _load_trip_summaries(
     date_to: date | None,
 ):
     cache_key = (
+        limit,
+        offset,
         analysis_status,
         date_from.isoformat() if date_from else None,
         date_to.isoformat() if date_to else None,
@@ -148,81 +158,59 @@ def _load_trip_summaries(
         summaries = cached[1]
         return summaries[offset: offset + limit]
 
+    if date_from is None and date_to is None:
+        summary_rows = list_materialized_trips(
+            db,
+            media_type="image",
+            analysis_status=analysis_status,
+            limit=limit,
+            offset=offset,
+        )
+        if summary_rows:
+            cover_cards = _load_media_cards_by_ids(
+                db,
+                [str(row["cover_media_id"]) for row in summary_rows if row.get("cover_media_id")],
+            )
+            summaries = [
+                TVTripSummary(
+                    trip_name=str(row["trip_name"]),
+                    count=int(row.get("item_count") or 0),
+                    latest_date=row.get("latest_date"),
+                    cover=_tv_card_from_media_card(cover_cards[str(row["cover_media_id"])]),
+                )
+                for row in summary_rows
+                if row.get("cover_media_id") and str(row["cover_media_id"]) in cover_cards
+            ]
+            _prune_cache_entries(_tv_trip_summary_cache, TV_TRIP_SUMMARY_CACHE_TTL_SECONDS)
+            _tv_trip_summary_cache[cache_key] = (now, summaries)
+            return summaries
+
     base_conditions = _build_media_conditions(
         media_type="image",
         analysis_status=analysis_status,
         date_from=date_from,
         date_to=date_to,
     )
-    trip_rows = db.execute(
-        select(
-            MediaItem.id,
-            MediaItem.filename,
-            MediaItem.source_path,
-            MediaItem.media_type,
-            MediaItem.caption,
-            MediaItem.country,
-            MediaItem.region,
-            MediaItem.city,
-            MediaItem.place,
-            MediaItem.landmark,
-            MediaItem.latitude,
-            MediaItem.longitude,
-            MediaItem.thumbnail_url,
-            MediaItem.date_taken,
-            MediaItem.duration,
-            MediaItem.trip_name,
-            MediaItem.analysis_status,
-            MediaItem.analysis_completed_at,
-            MediaItem.analysis_model,
-            MediaItem.analysis_version,
-            MediaItem.indexed_at,
-        )
-        .where(and_(*base_conditions), MediaItem.trip_name.is_not(None))
+    summary_rows = db.execute(
+        _trip_summary_cover_rows(base_conditions, limit=limit, offset=offset)
     ).all()
-    if not trip_rows:
+    if not summary_rows:
         _prune_cache_entries(_tv_trip_summary_cache, TV_TRIP_SUMMARY_CACHE_TTL_SECONDS)
         _tv_trip_summary_cache[cache_key] = (now, [])
         return []
 
-    summaries_by_trip: dict[str, dict[str, object]] = {}
-    for row in trip_rows:
-        trip_name = _row_value(row, "trip_name")
-        if not trip_name:
-            continue
-        row_date = _row_value(row, "date_taken") or _row_value(row, "indexed_at")
-        summary = summaries_by_trip.get(trip_name)
-        if summary is None:
-            summaries_by_trip[trip_name] = {
-                "count": 1,
-                "latest_date": row_date,
-                "earliest_date": row_date,
-                "cover": _tv_card_from_media_card(_media_card_from_row(row, compact=True)),
-            }
-            continue
-        summary["count"] = int(summary["count"]) + 1
-        latest_date = summary["latest_date"]
-        earliest_date = summary["earliest_date"]
-        if row_date is not None and (latest_date is None or row_date > latest_date):
-            summary["latest_date"] = row_date
-        if row_date is not None and (earliest_date is None or row_date < earliest_date):
-            summary["earliest_date"] = row_date
-            summary["cover"] = _tv_card_from_media_card(_media_card_from_row(row, compact=True))
-
-    sorted_summaries = sorted(summaries_by_trip.items(), key=lambda item: item[0])
-    sorted_summaries.sort(key=lambda item: item[1]["earliest_date"], reverse=True)
     summaries = [
         TVTripSummary(
-            trip_name=trip_name,
-            count=int(summary["count"]),
-            latest_date=summary["latest_date"],
-            cover=summary["cover"],
+            trip_name=_row_value(row, "summary_trip_name"),
+            count=int(_row_value(row, "summary_count", 0) or 0),
+            latest_date=_row_value(row, "summary_latest_date"),
+            cover=_tv_card_from_media_card(_media_card_from_row(row, compact=True)),
         )
-        for trip_name, summary in sorted_summaries
+        for row in summary_rows
     ]
     _prune_cache_entries(_tv_trip_summary_cache, TV_TRIP_SUMMARY_CACHE_TTL_SECONDS)
     _tv_trip_summary_cache[cache_key] = (now, summaries)
-    return summaries[offset: offset + limit]
+    return summaries
 
 
 @router.get("/home", response_model=TVHomeResponse)

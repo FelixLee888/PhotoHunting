@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 from pathlib import Path
+import time
 
 from fastapi import HTTPException, Request
 from sqlalchemy.exc import OperationalError
@@ -20,10 +21,14 @@ from app.schemas.analysis import (
     AnalysisStatsResponse,
 )
 from app.services.embeddings import build_embedding_provider
+from app.services.summary_store import refresh_media_item_summaries
 from app.services.vector_store import VectorStore
 
 
 class AnalysisQueueService:
+    CLAIM_RETRY_ATTEMPTS = 3
+    CLAIM_RETRY_DELAY_SECONDS = 0.25
+
     def __init__(self, settings: Settings, vector_store: VectorStore) -> None:
         self.settings = settings
         self.vector_store = vector_store
@@ -224,40 +229,59 @@ class AnalysisQueueService:
         if stale_claims:
             db.flush()
 
-        now = datetime.utcnow()
-        result = db.execute(
-            update(MediaItem)
-            .where(
-                MediaItem.id == media_id,
-                MediaItem.deleted_at.is_(None),
-                MediaItem.media_type == "image",
-                or_(
-                    MediaItem.analysis_status.in_([AnalysisStatus.PENDING.value, AnalysisStatus.FAILED.value]),
-                    and_(
-                        MediaItem.analysis_status == AnalysisStatus.COMPLETED.value,
-                        self._model_version_mismatch(
-                            body.analysis_model,
-                            body.analysis_version,
+        claim_error: OperationalError | None = None
+        claimed = False
+        for attempt in range(self.CLAIM_RETRY_ATTEMPTS):
+            try:
+                now = datetime.utcnow()
+                result = db.execute(
+                    update(MediaItem)
+                    .where(
+                        MediaItem.id == media_id,
+                        MediaItem.deleted_at.is_(None),
+                        MediaItem.media_type == "image",
+                        or_(
+                            MediaItem.analysis_status.in_([AnalysisStatus.PENDING.value, AnalysisStatus.FAILED.value]),
+                            and_(
+                                MediaItem.analysis_status == AnalysisStatus.COMPLETED.value,
+                                self._model_version_mismatch(
+                                    body.analysis_model,
+                                    body.analysis_version,
+                                ),
+                            ),
                         ),
-                    ),
-                ),
-            )
-            .values(
-                analysis_status=AnalysisStatus.CLAIMED.value,
-                analysis_attempts=func.coalesce(MediaItem.analysis_attempts, 0) + 1,
-                analysis_worker_id=body.worker_id,
-                analysis_claimed_at=now,
-                analysis_heartbeat_at=now,
-                analysis_model=body.analysis_model,
-                analysis_version=body.analysis_version,
-                analysis_error=None,
-            )
-        )
-        if result.rowcount == 0:
-            db.rollback()
+                    )
+                    .values(
+                        analysis_status=AnalysisStatus.CLAIMED.value,
+                        analysis_attempts=func.coalesce(MediaItem.analysis_attempts, 0) + 1,
+                        analysis_worker_id=body.worker_id,
+                        analysis_claimed_at=now,
+                        analysis_heartbeat_at=now,
+                        analysis_model=body.analysis_model,
+                        analysis_version=body.analysis_version,
+                        analysis_error=None,
+                    )
+                )
+                if result.rowcount == 0:
+                    db.rollback()
+                    raise HTTPException(status_code=409, detail="Media item is not claimable right now.")
+                db.commit()
+                claimed = True
+                break
+            except OperationalError as exc:
+                db.rollback()
+                if not self._is_transient_sqlite_lock(exc):
+                    raise
+                claim_error = exc
+                if attempt >= self.CLAIM_RETRY_ATTEMPTS - 1:
+                    break
+                time.sleep(self.CLAIM_RETRY_DELAY_SECONDS * (attempt + 1))
+
+        if not claimed:
+            if claim_error is not None:
+                raise HTTPException(status_code=503, detail="Database is busy. Please retry shortly.")
             raise HTTPException(status_code=409, detail="Media item is not claimable right now.")
 
-        db.commit()
         item = db.get(MediaItem, media_id)
         if not item:
             raise HTTPException(status_code=404, detail="Media item not found.")
@@ -302,6 +326,7 @@ class AnalysisQueueService:
         if item.analysis_worker_id and item.analysis_worker_id != body.worker_id and item.analysis_status == AnalysisStatus.CLAIMED.value:
             raise HTTPException(status_code=409, detail="Media item is claimed by a different worker.")
 
+        previous_status = item.analysis_status
         now = datetime.utcnow()
         item.analysis_model = body.analysis_model
         item.analysis_version = body.analysis_version
@@ -314,6 +339,7 @@ class AnalysisQueueService:
             item.analysis_error = body.error or "Analysis failed."
             item.analysis_completed_at = None
             db.commit()
+            refresh_media_item_summaries(db, item.id, previous_analysis_status=previous_status)
             return AnalysisResultResponse(media_id=item.id, analysis_status=item.analysis_status)
 
         tags_json = normalize_text_list(body.tags_json)
@@ -364,6 +390,7 @@ class AnalysisQueueService:
         item.embedding = self.embedder.embed_document(build_embedding_source(item))
 
         db.commit()
+        refresh_media_item_summaries(db, item.id, previous_analysis_status=previous_status)
         db.refresh(item)
         self.vector_store.upsert_media(item)
         return AnalysisResultResponse(

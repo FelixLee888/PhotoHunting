@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     preview_jpeg_quality: int = 72
     tv_preview_max_dimension: int = 1920
     tv_preview_jpeg_quality: int = 84
+    materialized_summary_enabled: bool = True
+    summary_prewarm_enabled: bool = True
+    summary_prewarm_interval_seconds: int = 120
+    sqlite_optimize_interval_seconds: int = 1800
+    sqlite_analyze_interval_seconds: int = 21600
     seed_demo_data: bool = True
     dlna_enabled: bool = True
     dlna_advertise_host: str | None = None

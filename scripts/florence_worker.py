@@ -236,6 +236,22 @@ class PhotoHuntingApiClient:
                     response.raise_for_status()
                     self._remember_successful_base(candidate_url)
                     return response
+                except httpx.HTTPStatusError as exc:
+                    last_error = exc
+                    status_code = exc.response.status_code
+                    if not (500 <= status_code < 600):
+                        raise
+                    if attempt >= total_attempts:
+                        break
+                    logging.warning(
+                        "%s %s failed on attempt %s/%s with HTTP %s",
+                        method,
+                        candidate_url,
+                        attempt,
+                        total_attempts,
+                        status_code,
+                    )
+                    time.sleep(self.retry_delay_seconds)
                 except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError) as exc:
                     last_error = exc
                     if attempt >= total_attempts:
@@ -779,7 +795,8 @@ def run_worker(args: argparse.Namespace) -> int:
                 try:
                     claimed_job = client.claim_job(job.id)
                 except httpx.HTTPStatusError as exc:
-                    if exc.response.status_code == 409:
+                    if exc.response.status_code in {409, 500, 503}:
+                        logging.warning("Claim skipped for %s: %s", job.id, exc)
                         continue
                     raise
                 except httpx.HTTPError as exc:

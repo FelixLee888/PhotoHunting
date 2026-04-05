@@ -55,6 +55,7 @@ type ResultGridProps = {
   yearGroups?: YearMediaGroup[];
   selectedId: string | null;
   activeTripName?: string | null;
+  tripStoryYear?: number | null;
   density?: "comfortable" | "compact";
   groupByDay?: boolean;
   compactStoryStrip?: boolean;
@@ -72,6 +73,20 @@ function formatDate(dateTaken?: string | null): string {
     month: "short",
     year: "numeric",
   });
+}
+
+function matchesStoryYear(result: MediaCard, year: number | null): boolean {
+  if (!year) {
+    return true;
+  }
+  if (!result.date_taken) {
+    return false;
+  }
+  const parsed = new Date(result.date_taken);
+  if (Number.isNaN(parsed.getTime())) {
+    return false;
+  }
+  return parsed.getFullYear() === year;
 }
 
 function storyTitle(result: MediaCard): string {
@@ -272,6 +287,7 @@ export const ResultGrid = memo(function ResultGrid({
   yearGroups = [],
   selectedId,
   activeTripName = null,
+  tripStoryYear = null,
   density = "comfortable",
   groupByDay = false,
   compactStoryStrip = false,
@@ -341,7 +357,12 @@ export const ResultGrid = memo(function ResultGrid({
     );
   }
 
-  const tripStories = useMemo(() => buildTripStories(results), [results]);
+  const tripStories = useMemo(() => {
+    const scopedResults = tripStoryYear
+      ? results.filter((result) => matchesStoryYear(result, tripStoryYear))
+      : results;
+    return buildTripStories(scopedResults);
+  }, [results, tripStoryYear]);
   const highlightCards = useMemo(
     () => (tripStories.length ? [] : results.slice(0, Math.min(3, results.length))),
     [results, tripStories.length],

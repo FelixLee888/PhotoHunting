@@ -15,17 +15,25 @@ from app.db.session import get_db
 from app.models import MediaItem
 from app.schemas.common import LibraryYear, MediaCard, MediaDetail, SegmentSummary, TimelineMonth, TripSummary, YearMediaGroup
 from app.services.previews import ensure_preview, preview_url_for_media
+from app.services.summary_store import list_materialized_months, list_materialized_trips, list_materialized_years
 
 router = APIRouter(prefix="/media", tags=["media"])
 COMPACT_CAPTION_LIMIT = 160
-YEARS_CACHE_TTL_SECONDS = 120.0
-MONTHS_CACHE_TTL_SECONDS = 45.0
-YEAR_GROUPS_CACHE_TTL_SECONDS = 120.0
-TRIPS_CACHE_TTL_SECONDS = 120.0
+YEARS_CACHE_TTL_SECONDS = 900.0
+MONTHS_CACHE_TTL_SECONDS = 300.0
+YEAR_GROUPS_CACHE_TTL_SECONDS = 900.0
+TRIPS_CACHE_TTL_SECONDS = 900.0
 _years_cache: dict[tuple[object, ...], tuple[float, list[LibraryYear]]] = {}
 _months_cache: dict[tuple[object, ...], tuple[float, list[TimelineMonth]]] = {}
 _year_groups_cache: dict[tuple[object, ...], tuple[float, list[YearMediaGroup]]] = {}
 _trips_cache: dict[tuple[object, ...], tuple[float, list[TripSummary]]] = {}
+
+
+def invalidate_media_summary_caches() -> None:
+    _years_cache.clear()
+    _months_cache.clear()
+    _year_groups_cache.clear()
+    _trips_cache.clear()
 
 
 def _build_media_conditions(
@@ -119,6 +127,77 @@ def _earliest_ordering():
     )
 
 
+def _trip_summary_cover_rows(conditions: list, *, limit: int, offset: int = 0):
+    effective_limit = max(1, limit)
+    trip_date_expr = func.coalesce(MediaItem.date_taken, MediaItem.indexed_at)
+    trip_conditions = [*conditions, MediaItem.trip_name.is_not(None)]
+
+    summary_subquery = (
+        select(
+            MediaItem.trip_name.label("summary_trip_name"),
+            func.count(MediaItem.id).label("summary_count"),
+            func.min(trip_date_expr).label("summary_earliest_date"),
+            func.max(trip_date_expr).label("summary_latest_date"),
+        )
+        .where(and_(*trip_conditions))
+        .group_by(MediaItem.trip_name)
+        .order_by(
+            func.min(trip_date_expr).desc(),
+            MediaItem.trip_name.asc(),
+        )
+        .offset(offset)
+        .limit(effective_limit)
+        .subquery()
+    )
+
+    cover_rank = func.row_number().over(
+        partition_by=summary_subquery.c.summary_trip_name,
+        order_by=list(_earliest_ordering()),
+    ).label("cover_rank")
+
+    cover_subquery = (
+        select(
+            summary_subquery.c.summary_trip_name,
+            summary_subquery.c.summary_count,
+            summary_subquery.c.summary_latest_date,
+            summary_subquery.c.summary_earliest_date,
+            MediaItem.id,
+            MediaItem.filename,
+            MediaItem.source_path,
+            MediaItem.media_type,
+            MediaItem.caption,
+            MediaItem.country,
+            MediaItem.region,
+            MediaItem.city,
+            MediaItem.place,
+            MediaItem.landmark,
+            MediaItem.latitude,
+            MediaItem.longitude,
+            MediaItem.thumbnail_url,
+            MediaItem.date_taken,
+            MediaItem.duration,
+            MediaItem.trip_name,
+            MediaItem.analysis_status,
+            MediaItem.analysis_completed_at,
+            MediaItem.analysis_model,
+            MediaItem.analysis_version,
+            cover_rank,
+        )
+        .join(summary_subquery, summary_subquery.c.summary_trip_name == MediaItem.trip_name)
+        .where(and_(*trip_conditions))
+        .subquery()
+    )
+
+    return (
+        select(cover_subquery)
+        .where(cover_subquery.c.cover_rank == 1)
+        .order_by(
+            cover_subquery.c.summary_earliest_date.desc(),
+            cover_subquery.c.summary_trip_name.asc(),
+        )
+    )
+
+
 def _media_card_from_row(row, *, compact: bool = False) -> MediaCard:
     return MediaCard(
         id=_row_value(row, "id"),
@@ -152,6 +231,58 @@ def _media_card_from_row(row, *, compact: bool = False) -> MediaCard:
     )
 
 
+def _supports_materialized_summary(
+    *,
+    trip_name: str | None = None,
+    country: str | None = None,
+    region: str | None = None,
+    city: str | None = None,
+    tag: str | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    bbox: str | None = None,
+) -> bool:
+    return not any([trip_name, country, region, city, tag, date_from, date_to, bbox])
+
+
+def _media_card_select():
+    return select(
+        MediaItem.id,
+        MediaItem.filename,
+        MediaItem.source_path,
+        MediaItem.media_type,
+        MediaItem.caption,
+        MediaItem.country,
+        MediaItem.region,
+        MediaItem.city,
+        MediaItem.place,
+        MediaItem.landmark,
+        MediaItem.latitude,
+        MediaItem.longitude,
+        MediaItem.thumbnail_url,
+        MediaItem.date_taken,
+        MediaItem.duration,
+        MediaItem.trip_name,
+        MediaItem.analysis_status,
+        MediaItem.analysis_completed_at,
+        MediaItem.analysis_model,
+        MediaItem.analysis_version,
+    )
+
+
+def _load_media_cards_by_ids(db: Session, media_ids: list[str]) -> dict[str, MediaCard]:
+    if not media_ids:
+        return {}
+    rows = db.execute(
+        _media_card_select().where(MediaItem.id.in_(media_ids))
+    ).all()
+    cards = {
+        _row_value(row, "id"): _media_card_from_row(row, compact=True)
+        for row in rows
+    }
+    return cards
+
+
 @router.get("", response_model=list[MediaCard])
 def list_media(
     limit: int = Query(default=18, ge=1, le=240),
@@ -182,28 +313,7 @@ def list_media(
     )
 
     rows = db.execute(
-        select(
-            MediaItem.id,
-            MediaItem.filename,
-            MediaItem.source_path,
-            MediaItem.media_type,
-            MediaItem.caption,
-            MediaItem.country,
-            MediaItem.region,
-            MediaItem.city,
-            MediaItem.place,
-            MediaItem.landmark,
-            MediaItem.latitude,
-            MediaItem.longitude,
-            MediaItem.thumbnail_url,
-            MediaItem.date_taken,
-            MediaItem.duration,
-            MediaItem.trip_name,
-            MediaItem.analysis_status,
-            MediaItem.analysis_completed_at,
-            MediaItem.analysis_model,
-            MediaItem.analysis_version,
-        )
+        _media_card_select()
         .where(and_(*conditions))
         .order_by(*_recent_ordering())
         .offset(offset)
@@ -241,6 +351,26 @@ def list_media_years(
     cached_entry = _years_cache.get(cache_key)
     if cached_entry and now - cached_entry[0] < YEARS_CACHE_TTL_SECONDS:
         return cached_entry[1]
+
+    if _supports_materialized_summary(
+        trip_name=trip_name,
+        country=country,
+        region=region,
+        city=city,
+        tag=tag,
+        date_from=date_from,
+        date_to=date_to,
+    ):
+        rows = list_materialized_years(db, media_type=media_type, analysis_status=analysis_status)
+        if rows:
+            years = [
+                LibraryYear(year=int(row["year_value"]), count=int(row["item_count"]))
+                for row in rows
+                if row.get("year_value") is not None
+            ]
+            _prune_timed_cache(_years_cache, YEARS_CACHE_TTL_SECONDS)
+            _years_cache[cache_key] = (now, years)
+            return years
 
     conditions = _build_media_conditions(
         media_type=media_type,
@@ -299,6 +429,50 @@ def list_media_months(
     cached_entry = _months_cache.get(cache_key)
     if cached_entry and now - cached_entry[0] < MONTHS_CACHE_TTL_SECONDS:
         return cached_entry[1]
+
+    if _supports_materialized_summary(
+        trip_name=trip_name,
+        country=country,
+        region=region,
+        city=city,
+        tag=tag,
+        date_from=date_from,
+        date_to=date_to,
+    ):
+        rows = list_materialized_months(
+            db,
+            media_type=media_type,
+            analysis_status=analysis_status,
+            year=year,
+        )
+        if rows:
+            timeline_months: list[TimelineMonth] = []
+            for row in rows:
+                year_value = row.get("year_value")
+                month_value = row.get("month_value")
+                if year_value is None or month_value is None:
+                    continue
+                month_start = datetime(int(year_value), int(month_value), 1)
+                timeline_months.append(
+                    TimelineMonth(
+                        key=f"{int(year_value):04d}-{int(month_value):02d}",
+                        year=int(year_value),
+                        month=int(month_value),
+                        label=month_start.strftime("%b %Y"),
+                        short_label=month_start.strftime("%b"),
+                        count=int(row.get("item_count") or 0),
+                    )
+                )
+            if len(_months_cache) > 48:
+                expired_keys = [
+                    key
+                    for key, entry in _months_cache.items()
+                    if now - entry[0] >= MONTHS_CACHE_TTL_SECONDS
+                ]
+                for key in expired_keys:
+                    _months_cache.pop(key, None)
+            _months_cache[cache_key] = (now, timeline_months)
+            return timeline_months
 
     conditions = _build_media_conditions(
         media_type=media_type,
@@ -488,6 +662,7 @@ def list_media_trips(
     db: Session = Depends(get_db),
 ):
     cache_key = (
+        limit,
         media_type,
         analysis_status,
         country,
@@ -502,6 +677,39 @@ def list_media_trips(
     if cached_entry and now - cached_entry[0] < TRIPS_CACHE_TTL_SECONDS:
         return cached_entry[1][:limit]
 
+    if _supports_materialized_summary(
+        country=country,
+        region=region,
+        city=city,
+        tag=tag,
+        date_from=date_from,
+        date_to=date_to,
+    ):
+        trip_rows = list_materialized_trips(
+            db,
+            media_type=media_type,
+            analysis_status=analysis_status,
+            limit=limit,
+            offset=0,
+        )
+        if trip_rows:
+            cover_cards = _load_media_cards_by_ids(
+                db,
+                [str(row["cover_media_id"]) for row in trip_rows if row.get("cover_media_id")],
+            )
+            summaries = [
+                TripSummary(
+                    trip_name=str(row["trip_name"]),
+                    count=int(row.get("item_count") or 0),
+                    latest_date=row.get("latest_date"),
+                    cover=cover_cards.get(str(row.get("cover_media_id"))),
+                )
+                for row in trip_rows
+            ]
+            _prune_timed_cache(_trips_cache, TRIPS_CACHE_TTL_SECONDS)
+            _trips_cache[cache_key] = (now, summaries)
+            return summaries
+
     base_conditions = _build_media_conditions(
         media_type=media_type,
         analysis_status=analysis_status,
@@ -512,78 +720,27 @@ def list_media_trips(
         date_from=date_from,
         date_to=date_to,
     )
-    trip_conditions = [*base_conditions, MediaItem.trip_name.is_not(None)]
-
-    trip_rows = db.execute(
-        select(
-            MediaItem.id,
-            MediaItem.filename,
-            MediaItem.source_path,
-            MediaItem.media_type,
-            MediaItem.caption,
-            MediaItem.country,
-            MediaItem.region,
-            MediaItem.city,
-            MediaItem.place,
-            MediaItem.landmark,
-            MediaItem.latitude,
-            MediaItem.longitude,
-            MediaItem.thumbnail_url,
-            MediaItem.date_taken,
-            MediaItem.duration,
-            MediaItem.trip_name,
-            MediaItem.analysis_status,
-            MediaItem.analysis_completed_at,
-            MediaItem.analysis_model,
-            MediaItem.analysis_version,
-            MediaItem.indexed_at,
-        )
-        .where(and_(*trip_conditions))
+    summary_rows = db.execute(
+        _trip_summary_cover_rows(base_conditions, limit=limit)
     ).all()
 
-    if not trip_rows:
+    if not summary_rows:
         _prune_timed_cache(_trips_cache, TRIPS_CACHE_TTL_SECONDS)
         _trips_cache[cache_key] = (now, [])
         return []
 
-    summaries_by_trip: dict[str, dict[str, object]] = {}
-    for row in trip_rows:
-        trip_name = _row_value(row, "trip_name")
-        if not trip_name:
-            continue
-        row_date = _row_value(row, "date_taken") or _row_value(row, "indexed_at")
-        summary = summaries_by_trip.get(trip_name)
-        if summary is None:
-            summaries_by_trip[trip_name] = {
-                "count": 1,
-                "latest_date": row_date,
-                "earliest_date": row_date,
-                "cover": _media_card_from_row(row, compact=True),
-            }
-            continue
-        summary["count"] = int(summary["count"]) + 1
-        latest_date = summary["latest_date"]
-        earliest_date = summary["earliest_date"]
-        if row_date is not None and (latest_date is None or row_date > latest_date):
-            summary["latest_date"] = row_date
-        if row_date is not None and (earliest_date is None or row_date < earliest_date):
-            summary["earliest_date"] = row_date
-            summary["cover"] = _media_card_from_row(row, compact=True)
-
-    sorted_summaries = sorted(summaries_by_trip.items(), key=lambda item: item[0])
-    sorted_summaries.sort(key=lambda item: item[1]["earliest_date"], reverse=True)
     summaries = [
         TripSummary(
-            trip_name=trip_name,
-            count=int(summary["count"]),
-            latest_date=summary["latest_date"],
-            cover=summary["cover"],
+            trip_name=_row_value(row, "summary_trip_name"),
+            count=int(_row_value(row, "summary_count", 0) or 0),
+            latest_date=_row_value(row, "summary_latest_date"),
+            cover=_media_card_from_row(row, compact=True),
         )
-        for trip_name, summary in sorted_summaries
+        for row in summary_rows
     ]
     _prune_timed_cache(_trips_cache, TRIPS_CACHE_TTL_SECONDS)
     _trips_cache[cache_key] = (now, summaries)
-    return summaries[:limit]
+    return summaries
 
 
 @router.get("/{media_id}", response_model=MediaDetail)

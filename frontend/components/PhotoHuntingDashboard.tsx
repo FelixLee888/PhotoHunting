@@ -601,12 +601,16 @@ export function PhotoHuntingDashboard() {
     const maxAvailableYear = libraryYears[0]?.year ?? END_YEAR;
     setYearStart((current) => Math.min(maxAvailableYear, Math.max(minAvailableYear, current)));
     setYearEnd((current) => Math.min(maxAvailableYear, Math.max(minAvailableYear, current)));
-    setBrowseYear((current) => (
-      current && libraryYears.some((entry) => entry.year === current)
-        ? current
-        : null
-    ));
-  }, [libraryYears]);
+    setBrowseYear((current) => {
+      if (current && libraryYears.some((entry) => entry.year === current)) {
+        return current;
+      }
+      if (resultMode === "browse" && !browseMonthKey && !activeTripName) {
+        return maxAvailableYear;
+      }
+      return null;
+    });
+  }, [activeTripName, browseMonthKey, libraryYears, resultMode]);
 
   useEffect(() => {
     if (secondaryDataEnabled || resultsLoading) {
@@ -1926,6 +1930,7 @@ export function PhotoHuntingDashboard() {
                 results={results}
                 selectedId={selectedId}
                 activeTripName={activeTripName}
+                tripStoryYear={resultMode === "browse" && browseYear && !browseMonthKey && !activeTripName ? browseYear : null}
                 density={gridDensity}
                 groupByDay={resultMode === "browse" && !!browseYear}
                 compactStoryStrip={resultMode === "browse"}
