@@ -14,6 +14,7 @@ from app.core.config import Settings
 from app.db.session import get_db
 from app.models import MediaItem
 from app.schemas.common import LibraryYear, MediaCard, MediaDetail, SegmentSummary, TimelineMonth, TripSummary, YearMediaGroup
+from app.services.metadata import infer_trip_from_path
 from app.services.previews import ensure_preview, preview_url_for_media
 from app.services.summary_store import list_materialized_months, list_materialized_trips, list_materialized_years
 
@@ -127,10 +128,111 @@ def _earliest_ordering():
     )
 
 
+def _trip_display_name(summary_name: str | None, cover: MediaCard | None) -> str | None:
+    source_path = getattr(cover, "source_path", None)
+    if source_path:
+        inferred = infer_trip_from_path(Path(source_path)).get("trip_name")
+        if inferred:
+            return inferred
+    return summary_name
+
+
+def _trip_cover_sort_value(cover: MediaCard | None) -> tuple[int, datetime | None, str]:
+    if cover is None:
+        return (1, None, "")
+    return (0, cover.date_taken, cover.id)
+
+
+def _trip_summary_sort_value(summary: TripSummary) -> tuple[str, str]:
+    trip_name = summary.trip_name or ""
+    if len(trip_name) >= 10 and trip_name[4:5] == "-" and trip_name[7:8] == "-" and trip_name[10:11] == " ":
+        return (trip_name[:10], trip_name)
+    if len(trip_name) >= 7 and trip_name[4:5] == "-" and trip_name[7:8] == " ":
+        return (f"{trip_name[:7]}-01", trip_name)
+    latest_date = summary.latest_date.isoformat()[:10] if summary.latest_date else "0000-00-00"
+    return (latest_date, trip_name)
+
+
+def _trip_effective_date(summary: TripSummary) -> date | None:
+    trip_name = summary.trip_name or ""
+    try:
+        if len(trip_name) >= 10 and trip_name[4:5] == "-" and trip_name[7:8] == "-" and trip_name[10:11] == " ":
+            return datetime.strptime(trip_name[:10], "%Y-%m-%d").date()
+        if len(trip_name) >= 7 and trip_name[4:5] == "-" and trip_name[7:8] == " ":
+            return datetime.strptime(f"{trip_name[:7]}-01", "%Y-%m-%d").date()
+    except ValueError:
+        pass
+    if summary.cover and summary.cover.date_taken:
+        return summary.cover.date_taken.date()
+    if summary.latest_date:
+        return summary.latest_date.date()
+    return None
+
+
+def _merge_trip_summaries(summaries: list[TripSummary]) -> list[TripSummary]:
+    merged: dict[str, TripSummary] = {}
+    for summary in summaries:
+        effective_name = _trip_display_name(summary.trip_name, summary.cover)
+        if not effective_name:
+            continue
+        normalized_cover = summary.cover
+        if normalized_cover is not None and normalized_cover.trip_name != effective_name:
+            normalized_cover = normalized_cover.model_copy(update={"trip_name": effective_name})
+        existing = merged.get(effective_name)
+        if existing is None:
+            merged[effective_name] = TripSummary(
+                trip_name=effective_name,
+                count=summary.count,
+                latest_date=summary.latest_date,
+                cover=normalized_cover,
+            )
+            continue
+        existing.count += summary.count
+        if summary.latest_date and (existing.latest_date is None or summary.latest_date > existing.latest_date):
+            existing.latest_date = summary.latest_date
+        if _trip_cover_sort_value(normalized_cover) < _trip_cover_sort_value(existing.cover):
+            existing.cover = normalized_cover
+    ordered = sorted(merged.values(), key=lambda summary: _trip_summary_sort_value(summary)[1])
+    ordered.sort(key=lambda summary: _trip_summary_sort_value(summary)[0], reverse=True)
+    return ordered
+
+
+def _filter_trip_summaries_by_date(
+    summaries: list[TripSummary],
+    *,
+    date_from: date | None,
+    date_to: date | None,
+) -> list[TripSummary]:
+    if date_from is None and date_to is None:
+        return summaries
+    filtered: list[TripSummary] = []
+    for summary in summaries:
+        effective_date = _trip_effective_date(summary)
+        if effective_date is None:
+            continue
+        if date_from is not None and effective_date < date_from:
+            continue
+        if date_to is not None and effective_date > date_to:
+            continue
+        filtered.append(summary)
+    return filtered
+
+
 def _trip_summary_cover_rows(conditions: list, *, limit: int, offset: int = 0):
     effective_limit = max(1, limit)
     trip_date_expr = func.coalesce(MediaItem.date_taken, MediaItem.indexed_at)
     trip_conditions = [*conditions, MediaItem.trip_name.is_not(None)]
+    trip_sort_date = case(
+        (
+            MediaItem.trip_name.like("____-__-__ %"),
+            func.substr(MediaItem.trip_name, 1, 10),
+        ),
+        (
+            MediaItem.trip_name.like("____-__ %"),
+            func.substr(MediaItem.trip_name, 1, 7) + "-01",
+        ),
+        else_=func.coalesce(func.strftime("%Y-%m-%d", func.min(trip_date_expr)), "0000-00-00"),
+    )
 
     summary_subquery = (
         select(
@@ -142,7 +244,7 @@ def _trip_summary_cover_rows(conditions: list, *, limit: int, offset: int = 0):
         .where(and_(*trip_conditions))
         .group_by(MediaItem.trip_name)
         .order_by(
-            func.min(trip_date_expr).desc(),
+            trip_sort_date.desc(),
             MediaItem.trip_name.asc(),
         )
         .offset(offset)
@@ -192,7 +294,20 @@ def _trip_summary_cover_rows(conditions: list, *, limit: int, offset: int = 0):
         select(cover_subquery)
         .where(cover_subquery.c.cover_rank == 1)
         .order_by(
-            cover_subquery.c.summary_earliest_date.desc(),
+            case(
+                (
+                    cover_subquery.c.summary_trip_name.like("____-__-__ %"),
+                    func.substr(cover_subquery.c.summary_trip_name, 1, 10),
+                ),
+                (
+                    cover_subquery.c.summary_trip_name.like("____-__ %"),
+                    func.substr(cover_subquery.c.summary_trip_name, 1, 7) + "-01",
+                ),
+                else_=func.coalesce(
+                    func.strftime("%Y-%m-%d", cover_subquery.c.summary_earliest_date),
+                    "0000-00-00",
+                ),
+            ).desc(),
             cover_subquery.c.summary_trip_name.asc(),
         )
     )
@@ -682,14 +797,12 @@ def list_media_trips(
         region=region,
         city=city,
         tag=tag,
-        date_from=date_from,
-        date_to=date_to,
     ):
         trip_rows = list_materialized_trips(
             db,
             media_type=media_type,
             analysis_status=analysis_status,
-            limit=limit,
+            limit=max(limit * 6, 500),
             offset=0,
         )
         if trip_rows:
@@ -697,7 +810,7 @@ def list_media_trips(
                 db,
                 [str(row["cover_media_id"]) for row in trip_rows if row.get("cover_media_id")],
             )
-            summaries = [
+            summaries = _merge_trip_summaries([
                 TripSummary(
                     trip_name=str(row["trip_name"]),
                     count=int(row.get("item_count") or 0),
@@ -705,10 +818,15 @@ def list_media_trips(
                     cover=cover_cards.get(str(row.get("cover_media_id"))),
                 )
                 for row in trip_rows
-            ]
+            ])
+            summaries = _filter_trip_summaries_by_date(
+                summaries,
+                date_from=date_from,
+                date_to=date_to,
+            )
             _prune_timed_cache(_trips_cache, TRIPS_CACHE_TTL_SECONDS)
             _trips_cache[cache_key] = (now, summaries)
-            return summaries
+            return summaries[:limit]
 
     base_conditions = _build_media_conditions(
         media_type=media_type,
@@ -729,7 +847,7 @@ def list_media_trips(
         _trips_cache[cache_key] = (now, [])
         return []
 
-    summaries = [
+    summaries = _merge_trip_summaries([
         TripSummary(
             trip_name=_row_value(row, "summary_trip_name"),
             count=int(_row_value(row, "summary_count", 0) or 0),
@@ -737,10 +855,10 @@ def list_media_trips(
             cover=_media_card_from_row(row, compact=True),
         )
         for row in summary_rows
-    ]
+    ])
     _prune_timed_cache(_trips_cache, TRIPS_CACHE_TTL_SECONDS)
     _trips_cache[cache_key] = (now, summaries)
-    return summaries
+    return summaries[:limit]
 
 
 @router.get("/{media_id}", response_model=MediaDetail)

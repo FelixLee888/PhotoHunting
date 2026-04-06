@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import bindparam, select, update
 
 from app.db.session import SessionLocal
 from app.models import MediaItem
@@ -11,7 +11,12 @@ from app.services.metadata import infer_trip_from_path
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Backfill trip_name from the nearest meaningful parent folder.")
+    parser = argparse.ArgumentParser(
+        description=(
+            "Backfill trip_name from dated trip folders like 'YYYY-MM-DD Trip Name' or "
+            "'YYYY-MM Trip Name', falling back to the nearest meaningful parent folder."
+        )
+    )
     parser.add_argument("--batch-size", type=int, default=250)
     parser.add_argument("--max-items", type=int, default=0)
     return parser.parse_args()
@@ -26,7 +31,7 @@ def main() -> int:
     with SessionLocal() as db:
         while True:
             statement = (
-                select(MediaItem.id, MediaItem.source_path, MediaItem.trip_name)
+                select(MediaItem.id, MediaItem.source_path, MediaItem.trip_name, MediaItem.metadata_json)
                 .order_by(MediaItem.id)
                 .limit(args.batch_size)
             )
@@ -37,8 +42,19 @@ def main() -> int:
             if not rows:
                 break
 
+            updates: list[dict[str, object]] = []
             for row in rows:
                 if args.max_items and scanned >= args.max_items:
+                    if updates:
+                        db.execute(
+                            update(MediaItem)
+                            .where(MediaItem.id == bindparam("target_id"))
+                            .values(
+                                trip_name=bindparam("trip_name"),
+                                metadata_json=bindparam("metadata_json"),
+                            ),
+                            updates,
+                        )
                     db.commit()
                     print(f"scanned={scanned}")
                     print(f"updated={updated}")
@@ -52,19 +68,30 @@ def main() -> int:
                 if row.trip_name == trip_name:
                     continue
 
-                item = db.get(MediaItem, row.id)
-                if item is None:
-                    continue
-
-                metadata_json = dict(item.metadata_json or {})
-                item.trip_name = trip_name
+                metadata_json = dict(row.metadata_json or {})
                 if trip_info:
                     metadata_json["trip_folder"] = trip_info
                 else:
                     metadata_json.pop("trip_folder", None)
-                item.metadata_json = metadata_json
+                updates.append(
+                    {
+                        "target_id": row.id,
+                        "trip_name": trip_name,
+                        "metadata_json": metadata_json,
+                    }
+                )
                 updated += 1
 
+            if updates:
+                db.execute(
+                    update(MediaItem)
+                    .where(MediaItem.id == bindparam("target_id"))
+                    .values(
+                        trip_name=bindparam("trip_name"),
+                        metadata_json=bindparam("metadata_json"),
+                    ),
+                    updates,
+                )
             db.commit()
 
     print(f"scanned={scanned}")

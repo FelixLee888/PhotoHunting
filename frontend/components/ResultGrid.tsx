@@ -6,6 +6,7 @@ import type { MediaCard, YearMediaGroup } from "../lib/types";
 
 type TripStory = {
   tripName: string;
+  rawTripName: string;
   count: number;
   cover: MediaCard;
   latestTimestamp: number;
@@ -103,13 +104,31 @@ function storySubtitle(result: MediaCard): string {
   return [result.place, result.city, result.country].filter(Boolean).join(", ") || "From your library";
 }
 
+function inferTripDisplayName(result: MediaCard): string | null {
+  const path = result.source_path || "";
+  if (path) {
+    const segments = path.split("/").filter(Boolean).reverse();
+    for (const segment of segments) {
+      const candidate = segment.trim().replace(/\s+/g, " ");
+      if (/^\d{4}-\d{2}-\d{2}\s+\S/.test(candidate)) {
+        return candidate;
+      }
+      if (/^\d{4}-\d{2}\s+\S/.test(candidate)) {
+        return candidate;
+      }
+    }
+  }
+  return result.trip_name || null;
+}
+
 function buildTripStories(results: MediaCard[]): TripStory[] {
   const groups = new Map<string, TripStory>();
   for (const result of results) {
-    if (!result.trip_name) {
+    const displayTripName = inferTripDisplayName(result);
+    if (!displayTripName) {
       continue;
     }
-    const existing = groups.get(result.trip_name);
+    const existing = groups.get(displayTripName);
     if (existing) {
       existing.count += 1;
       const currentDate = existing.cover.date_taken ? new Date(existing.cover.date_taken).getTime() : 0;
@@ -121,8 +140,9 @@ function buildTripStories(results: MediaCard[]): TripStory[] {
       continue;
     }
     const resultTimestamp = result.date_taken ? new Date(result.date_taken).getTime() : 0;
-    groups.set(result.trip_name, {
-      tripName: result.trip_name,
+    groups.set(displayTripName, {
+      tripName: displayTripName,
+      rawTripName: result.trip_name || displayTripName,
       count: 1,
       cover: result,
       latestTimestamp: resultTimestamp,
@@ -391,13 +411,13 @@ export const ResultGrid = memo(function ResultGrid({
       {tripStories.length ? (
         <div className={`storyStrip tripStoryStrip ${compactStoryStrip ? "compactVariant" : ""}`}>
           {tripStories.map((trip) => {
-            const active = trip.tripName === activeTripName;
+            const active = trip.tripName === activeTripName || trip.rawTripName === activeTripName;
             const result = trip.cover;
             return (
               <button
                 className={`storyCard ${compactStoryStrip ? "compactStoryCard" : ""} ${active ? "active tripActive" : ""}`}
                 key={trip.tripName}
-                onClick={() => onFilterTrip?.(trip.tripName)}
+                onClick={() => onFilterTrip?.(trip.rawTripName)}
                 type="button"
               >
                 {result.thumbnail_url ? (

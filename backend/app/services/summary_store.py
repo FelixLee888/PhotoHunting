@@ -437,11 +437,22 @@ def list_materialized_trips(
     rows = db.execute(
         text(
             """
-            SELECT trip_name, item_count, earliest_date, latest_date, cover_media_id
+            SELECT
+                trip_name,
+                item_count,
+                earliest_date,
+                latest_date,
+                cover_media_id
             FROM media_summary_trips
             WHERE media_scope = :media_scope
               AND status_scope = :status_scope
-            ORDER BY earliest_date DESC, trip_name ASC
+            ORDER BY
+              CASE
+                WHEN trip_name LIKE '____-__-__ %' THEN substr(trip_name, 1, 10)
+                WHEN trip_name LIKE '____-__ %' THEN substr(trip_name, 1, 7) || '-01'
+                ELSE COALESCE(strftime('%Y-%m-%d', earliest_date), '0000-00-00')
+              END DESC,
+              trip_name ASC
             LIMIT :limit_value OFFSET :offset_value
             """
         ),

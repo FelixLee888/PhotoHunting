@@ -146,6 +146,7 @@ GENERIC_PATH_TOKENS = {
 
 DATE_PREFIX_PATTERN = re.compile(r"^\d{4}(?:[-_ ]\d{2}){0,2}\s*")
 TRIP_FOLDER_PATTERN = re.compile(r"^(?P<date>\d{4}-\d{2}-\d{2})\s+(?P<name>.+\S)$")
+TRIP_FOLDER_MONTH_PATTERN = re.compile(r"^(?P<date>\d{4}-\d{2})\s+(?P<name>.+\S)$")
 DATE_ONLY_FOLDER_PATTERN = re.compile(r"^\d{4}(?:[-_ ]\d{2}){0,2}$")
 WHITESPACE_PATTERN = re.compile(r"\s+")
 NON_ALNUM_PATTERN = re.compile(r"[^a-z0-9]+")
@@ -746,7 +747,30 @@ def infer_location_from_path(path: Path) -> dict:
     return _fallback_place_from_path(path)
 
 
+def _build_trip_info(candidate: str) -> dict[str, str] | None:
+    for pattern, precision in (
+        (TRIP_FOLDER_PATTERN, "day"),
+        (TRIP_FOLDER_MONTH_PATTERN, "month"),
+    ):
+        match = pattern.match(candidate)
+        if not match:
+            continue
+        trip_date = match.group("date")
+        trip_event_name = WHITESPACE_PATTERN.sub(" ", match.group("name")).strip()
+        if not trip_event_name:
+            return None
+        return {
+            "trip_name": f"{trip_date} {trip_event_name}",
+            "trip_date": trip_date,
+            "trip_date_precision": precision,
+            "trip_event_name": trip_event_name,
+            "trip_folder_name": candidate,
+        }
+    return None
+
+
 def infer_trip_from_path(path: Path) -> dict[str, str]:
+    fallback_trip: dict[str, str] | None = None
     for part in reversed(path.parts[:-1]):
         candidate = WHITESPACE_PATTERN.sub(" ", Path(part).name.strip())
         if not candidate:
@@ -761,24 +785,16 @@ def infer_trip_from_path(path: Path) -> dict[str, str]:
             continue
         if tokens and all(token.isdigit() or token in GENERIC_PATH_TOKENS for token in tokens):
             continue
-        match = TRIP_FOLDER_PATTERN.match(candidate)
-        if match:
-            trip_date = match.group("date")
-            trip_event_name = WHITESPACE_PATTERN.sub(" ", match.group("name")).strip()
-            if not trip_event_name:
-                continue
-            return {
-                "trip_name": f"{trip_date} {trip_event_name}",
-                "trip_date": trip_date,
-                "trip_event_name": trip_event_name,
+        trip_info = _build_trip_info(candidate)
+        if trip_info:
+            return trip_info
+        if fallback_trip is None:
+            fallback_trip = {
+                "trip_name": candidate,
+                "trip_event_name": candidate,
                 "trip_folder_name": candidate,
             }
-        return {
-            "trip_name": candidate,
-            "trip_event_name": candidate,
-            "trip_folder_name": candidate,
-        }
-    return {}
+    return fallback_trip or {}
 
 
 def caption_and_tags_from_path(path: Path, media_type: str) -> tuple[str, list[str], list[str]]:

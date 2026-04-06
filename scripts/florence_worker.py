@@ -163,8 +163,10 @@ ENVIRONMENT_TAGS = {
     "water",
 }
 
+DATACLASS_KWARGS = {"slots": True} if sys.version_info >= (3, 10) else {}
 
-@dataclass(slots=True)
+
+@dataclass(**DATACLASS_KWARGS)
 class AnalysisJob:
     id: str
     filename: str

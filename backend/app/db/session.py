@@ -36,6 +36,15 @@ if is_sqlite:
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.execute("PRAGMA busy_timeout=30000")
         try:
+            # Keep SQLite temp work off the tiny NAS /tmp ramdisk.
+            cursor.execute("PRAGMA temp_store=MEMORY")
+        except Exception:
+            pass
+        try:
+            cursor.execute("PRAGMA cache_size=-65536")
+        except Exception:
+            pass
+        try:
             cursor.execute("PRAGMA journal_mode=WAL")
         except Exception:
             pass
@@ -122,3 +131,84 @@ def ensure_sqlite_schema() -> None:
                 """
             )
         )
+
+        fts_table_exists = connection.execute(
+            text("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'media_search_fts'")
+        ).first()
+        if fts_table_exists:
+            connection.execute(text("DROP TRIGGER IF EXISTS media_search_fts_ai"))
+            connection.execute(text("DROP TRIGGER IF EXISTS media_search_fts_au"))
+            connection.execute(text("DROP TRIGGER IF EXISTS media_search_fts_ad"))
+
+            connection.execute(
+                text(
+                    """
+                    CREATE TRIGGER media_search_fts_ai
+                    AFTER INSERT ON media_items
+                    BEGIN
+                        INSERT INTO media_search_fts(media_id, search_text)
+                        VALUES (new.id, trim(
+                        coalesce(new.filename, '') || ' ' ||
+                        coalesce(new.source_path, '') || ' ' ||
+                        coalesce(new.caption, '') || ' ' ||
+                        coalesce(new.ocr_text, '') || ' ' ||
+                        coalesce(new.country, '') || ' ' ||
+                        coalesce(new.region, '') || ' ' ||
+                        coalesce(new.city, '') || ' ' ||
+                        coalesce(new.place, '') || ' ' ||
+                        coalesce(new.landmark, '') || ' ' ||
+                        coalesce(new.tags, '') || ' ' ||
+                        coalesce(new.trip_name, '')
+                    ));
+                    END
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
+                    CREATE TRIGGER media_search_fts_au
+                    AFTER UPDATE OF
+                        filename,
+                        source_path,
+                        caption,
+                        ocr_text,
+                        country,
+                        region,
+                        city,
+                        place,
+                        landmark,
+                        tags,
+                        trip_name
+                    ON media_items
+                    BEGIN
+                        DELETE FROM media_search_fts WHERE media_id = old.id;
+                        INSERT INTO media_search_fts(media_id, search_text)
+                        VALUES (new.id, trim(
+                        coalesce(new.filename, '') || ' ' ||
+                        coalesce(new.source_path, '') || ' ' ||
+                        coalesce(new.caption, '') || ' ' ||
+                        coalesce(new.ocr_text, '') || ' ' ||
+                        coalesce(new.country, '') || ' ' ||
+                        coalesce(new.region, '') || ' ' ||
+                        coalesce(new.city, '') || ' ' ||
+                        coalesce(new.place, '') || ' ' ||
+                        coalesce(new.landmark, '') || ' ' ||
+                        coalesce(new.tags, '') || ' ' ||
+                        coalesce(new.trip_name, '')
+                    ));
+                    END
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
+                    CREATE TRIGGER media_search_fts_ad
+                    AFTER DELETE ON media_items
+                    BEGIN
+                        DELETE FROM media_search_fts WHERE media_id = old.id;
+                    END
+                    """
+                )
+            )

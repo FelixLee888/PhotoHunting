@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.api.media import (
     _build_media_conditions,
     _earliest_ordering,
+    _merge_trip_summaries,
     _media_card_from_row,
     _recent_ordering,
     _row_value,
@@ -21,6 +22,7 @@ from app.api.media import (
 )
 from app.db.session import get_db
 from app.models import MediaItem
+from app.schemas.common import TripSummary
 from app.schemas.tv import TVHomeResponse, TVMediaCard, TVPlaylistResponse, TVTripSummary
 from app.services.summary_store import list_materialized_trips
 
@@ -147,7 +149,6 @@ def _load_trip_summaries(
 ):
     cache_key = (
         limit,
-        offset,
         analysis_status,
         date_from.isoformat() if date_from else None,
         date_to.isoformat() if date_to else None,
@@ -163,27 +164,36 @@ def _load_trip_summaries(
             db,
             media_type="image",
             analysis_status=analysis_status,
-            limit=limit,
-            offset=offset,
+            limit=max((offset + limit) * 6, 600),
+            offset=0,
         )
         if summary_rows:
             cover_cards = _load_media_cards_by_ids(
                 db,
                 [str(row["cover_media_id"]) for row in summary_rows if row.get("cover_media_id")],
             )
-            summaries = [
-                TVTripSummary(
+            merged_summaries = _merge_trip_summaries([
+                TripSummary(
                     trip_name=str(row["trip_name"]),
                     count=int(row.get("item_count") or 0),
                     latest_date=row.get("latest_date"),
-                    cover=_tv_card_from_media_card(cover_cards[str(row["cover_media_id"])]),
+                    cover=cover_cards.get(str(row.get("cover_media_id"))),
                 )
                 for row in summary_rows
-                if row.get("cover_media_id") and str(row["cover_media_id"]) in cover_cards
+            ])
+            summaries = [
+                TVTripSummary(
+                    trip_name=summary.trip_name,
+                    count=summary.count,
+                    latest_date=summary.latest_date,
+                    cover=_tv_card_from_media_card(summary.cover),
+                )
+                for summary in merged_summaries
+                if summary.cover is not None
             ]
             _prune_cache_entries(_tv_trip_summary_cache, TV_TRIP_SUMMARY_CACHE_TTL_SECONDS)
             _tv_trip_summary_cache[cache_key] = (now, summaries)
-            return summaries
+            return summaries[offset: offset + limit]
 
     base_conditions = _build_media_conditions(
         media_type="image",
@@ -192,25 +202,35 @@ def _load_trip_summaries(
         date_to=date_to,
     )
     summary_rows = db.execute(
-        _trip_summary_cover_rows(base_conditions, limit=limit, offset=offset)
+        _trip_summary_cover_rows(base_conditions, limit=max((offset + limit) * 6, 600), offset=0)
     ).all()
     if not summary_rows:
         _prune_cache_entries(_tv_trip_summary_cache, TV_TRIP_SUMMARY_CACHE_TTL_SECONDS)
         _tv_trip_summary_cache[cache_key] = (now, [])
         return []
 
-    summaries = [
-        TVTripSummary(
+    merged_summaries = _merge_trip_summaries([
+        TripSummary(
             trip_name=_row_value(row, "summary_trip_name"),
             count=int(_row_value(row, "summary_count", 0) or 0),
             latest_date=_row_value(row, "summary_latest_date"),
-            cover=_tv_card_from_media_card(_media_card_from_row(row, compact=True)),
+            cover=_media_card_from_row(row, compact=True),
         )
         for row in summary_rows
+    ])
+    summaries = [
+        TVTripSummary(
+            trip_name=summary.trip_name,
+            count=summary.count,
+            latest_date=summary.latest_date,
+            cover=_tv_card_from_media_card(summary.cover),
+        )
+        for summary in merged_summaries
+        if summary.cover is not None
     ]
     _prune_cache_entries(_tv_trip_summary_cache, TV_TRIP_SUMMARY_CACHE_TTL_SECONDS)
     _tv_trip_summary_cache[cache_key] = (now, summaries)
-    return summaries
+    return summaries[offset: offset + limit]
 
 
 @router.get("/home", response_model=TVHomeResponse)
